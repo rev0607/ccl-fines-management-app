@@ -110,14 +110,14 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
         const playersResponse = await fetch('/api/players', { headers });
         if (playersResponse.ok) {
           const playersData = await playersResponse.json();
-          setPlayers(playersData);
+          setPlayers(Array.isArray(playersData) ? playersData : []);
         }
 
         // Fetch fine reasons
         const reasonsResponse = await fetch('/api/fine-reasons', { headers });
         if (reasonsResponse.ok) {
           const reasonsData = await reasonsResponse.json();
-          setFineReasons(reasonsData);
+          setFineReasons(Array.isArray(reasonsData) ? reasonsData : []);
         }
 
         // Fetch users (only for super admin)
@@ -125,22 +125,30 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
           const usersResponse = await fetch('/api/users', { headers });
           if (usersResponse.ok) {
             const usersData = await usersResponse.json();
-            setUsers(usersData);
+            setUsers(Array.isArray(usersData) ? usersData : []);
+          } else {
+            console.error('Failed to fetch users:', usersResponse.status);
+            setUsers([]);
           }
 
           // Fetch audit log
           const auditResponse = await fetch('/api/audit-logs', { headers });
           if (auditResponse.ok) {
             const auditData = await auditResponse.json();
-            setAuditLog(auditData);
+            setAuditLog(Array.isArray(auditData) ? auditData : []);
+          } else {
+            setAuditLog([]);
           }
+        } else {
+          // Ensure users is always an array for non-superadmin users
+          setUsers([]);
         }
 
         // Fetch settings
         const settingsResponse = await fetch('/api/settings', { headers });
         if (settingsResponse.ok) {
           const settingsData = await settingsResponse.json();
-          if (settingsData.length > 0) {
+          if (Array.isArray(settingsData) && settingsData.length > 0) {
             const settings = settingsData[0];
             setSystemConfig({
               currency: settings.currency || '$',
@@ -153,6 +161,11 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
       } catch (error) {
         console.error('Error fetching data:', error);
         toast.error('Failed to load admin data');
+        // Ensure all arrays are properly initialized even on error
+        setPlayers([]);
+        setFineReasons([]);
+        setUsers([]);
+        setAuditLog([]);
       } finally {
         setIsLoading(false);
       }
