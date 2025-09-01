@@ -31,7 +31,10 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  RotateCcw
+  RotateCcw,
+  FileDown,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -71,6 +74,7 @@ interface FinesPanelProps {
 }
 
 export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
+  const [activeSubTab, setActiveSubTab] = useState("fines");
   const [fines, setFines] = useState<Fine[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [fineReasons, setFineReasons] = useState<FineReason[]>([]);
@@ -83,6 +87,10 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
   const [selectedReason, setSelectedReason] = useState<string>("all");
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
   const [showDeleted, setShowDeleted] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
 
   const [formData, setFormData] = useState({
     playerId: "",
@@ -136,12 +144,14 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setFines(data);
+        setFines(Array.isArray(data) ? data : []);
       } else {
         console.error('Failed to fetch fines');
+        setFines([]);
       }
     } catch (error) {
       console.error('Fetch fines error:', error);
+      setFines([]);
     }
   };
 
@@ -156,10 +166,11 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setPlayers(data.filter((player: Player) => !player.deletedAt));
+        setPlayers(Array.isArray(data) ? data.filter((player: Player) => !player.deletedAt) : []);
       }
     } catch (error) {
       console.error('Fetch players error:', error);
+      setPlayers([]);
     }
   };
 
@@ -174,10 +185,11 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setFineReasons(data.filter((reason: FineReason) => !reason.deletedAt));
+        setFineReasons(Array.isArray(data) ? data.filter((reason: FineReason) => !reason.deletedAt) : []);
       }
     } catch (error) {
       console.error('Fetch fine reasons error:', error);
+      setFineReasons([]);
     }
   };
 
@@ -304,10 +316,18 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
     setShowAddFineModal(true);
   };
 
-  const totalFines = fines.filter(f => !f.deletedAt).length;
-  const totalAmount = fines.filter(f => !f.deletedAt).reduce((sum, fine) => sum + fine.amount, 0);
-  const activePlayers = players.length;
-  const pendingFines = fines.filter(f => !f.deletedAt).length;
+  // Pagination logic
+  const paginatedFines = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return fines.slice(startIndex, endIndex);
+  }, [fines, currentPage, itemsPerPage]);
+
+  const totalPages = Math.ceil(fines.length / itemsPerPage);
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+  };
 
   if (isLoading) {
     return (
@@ -332,385 +352,461 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
             }
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2"
-          >
-            <Filter className="h-4 w-4" />
-            Filters
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            className="flex items-center gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
+      </div>
+
+      <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
           {canAddFines && (
-            <Dialog open={showAddFineModal} onOpenChange={setShowAddFineModal}>
-              <DialogTrigger asChild>
-                <Button className="flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add Fine
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>Add New Fine</DialogTitle>
-                  <DialogDescription>
-                    Record a new fine for a team member
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="player">Player *</Label>
-                      <Select 
-                        value={formData.playerId} 
-                        onValueChange={(value) => setFormData(prev => ({ ...prev, playerId: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select player" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {players.map((player) => (
-                            <SelectItem key={player.id} value={player.id.toString()}>
-                              {player.name} (#{player.jerseyNumber})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+            <TabsTrigger value="add-fine">Add Fine</TabsTrigger>
+          )}
+          <TabsTrigger value="fines">Fines</TabsTrigger>
+          <TabsTrigger value="export">Export</TabsTrigger>
+        </TabsList>
+
+        {/* Add Fine Tab */}
+        {canAddFines && (
+          <TabsContent value="add-fine" className="space-y-6">
+            <div className="flex items-center gap-4">
+              <Dialog open={showAddFineModal} onOpenChange={setShowAddFineModal}>
+                <DialogTrigger asChild>
+                  <Button className="flex items-center gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Fine
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Add New Fine</DialogTitle>
+                    <DialogDescription>
+                      Record a new fine for a team member
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="player">Player *</Label>
+                        <Select 
+                          value={formData.playerId} 
+                          onValueChange={(value) => setFormData(prev => ({ ...prev, playerId: value }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select player" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {players.map((player) => (
+                              <SelectItem key={player.id} value={player.id.toString()}>
+                                {player.name} (#{player.jerseyNumber})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="reason">Fine Reason *</Label>
+                        <Select 
+                          value={formData.fineReasonId}
+                          onValueChange={(value) => {
+                            const reason = fineReasons.find(r => r.id.toString() === value);
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              fineReasonId: value,
+                              amount: reason ? reason.defaultAmount.toString() : prev.amount
+                            }));
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select reason" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fineReasons.map((reason) => (
+                              <SelectItem key={reason.id} value={reason.id.toString()}>
+                                {reason.name} (${reason.defaultAmount})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div>
-                      <Label htmlFor="reason">Fine Reason *</Label>
-                      <Select 
-                        value={formData.fineReasonId}
-                        onValueChange={(value) => {
-                          const reason = fineReasons.find(r => r.id.toString() === value);
-                          setFormData(prev => ({ 
-                            ...prev, 
-                            fineReasonId: value,
-                            amount: reason ? reason.defaultAmount.toString() : prev.amount
-                          }));
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select reason" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {fineReasons.map((reason) => (
-                            <SelectItem key={reason.id} value={reason.id.toString()}>
-                              {reason.name} (${reason.defaultAmount})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="amount">Amount ($) *</Label>
+                        <Input
+                          id="amount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.amount}
+                          onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="date">Fine Date *</Label>
+                        <Input
+                          id="date"
+                          type="date"
+                          value={formData.fineDate}
+                          onChange={(e) => setFormData(prev => ({ ...prev, fineDate: e.target.value }))}
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="amount">Amount ($) *</Label>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setShowAddFineModal(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleAddFine} disabled={isSubmitting}>
+                      {isSubmitting ? "Adding..." : "Add Fine"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Quick Fine Actions</CardTitle>
+                <CardDescription>Common fines for quick entry</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {fineReasons.slice(0, 8).map((reason) => (
+                    <Button
+                      key={reason.id}
+                      variant="outline"
+                      className="h-auto p-4 flex flex-col items-center gap-2"
+                      onClick={() => handleQuickFine(reason.id, reason.defaultAmount)}
+                    >
+                      <span className="font-medium">{reason.name}</span>
+                      <Badge variant="secondary">${reason.defaultAmount}</Badge>
+                    </Button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {/* Fines Tab */}
+        <TabsContent value="fines" className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">All Fines</h2>
+              <p className="text-muted-foreground">
+                {fines.length} total fines • Page {currentPage} of {totalPages}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowFilters(!showFilters)}
+                className="flex items-center gap-2"
+              >
+                <Filter className="h-4 w-4" />
+                Filters
+              </Button>
+              {canViewDeleted && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDeleted(!showDeleted)}
+                  className="flex items-center gap-2"
+                >
+                  {showDeleted ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showDeleted ? 'Hide Deleted' : 'Show Deleted'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {showFilters && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Filter className="h-5 w-5" />
+                  Filters
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <Label>Search</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        id="amount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={formData.amount}
-                        onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
-                        placeholder="0.00"
+                        placeholder="Search fines..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10"
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="date">Fine Date *</Label>
-                      <Input
-                        id="date"
-                        type="date"
-                        value={formData.fineDate}
-                        onChange={(e) => setFormData(prev => ({ ...prev, fineDate: e.target.value }))}
-                      />
-                    </div>
+                  </div>
+                  <div>
+                    <Label>Player</Label>
+                    <Select value={selectedPlayer} onValueChange={setSelectedPlayer}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Players</SelectItem>
+                        {players.map((player) => (
+                          <SelectItem key={player.id} value={player.id.toString()}>
+                            {player.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Fine Reason</Label>
+                    <Select value={selectedReason} onValueChange={setSelectedReason}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Reasons</SelectItem>
+                        {fineReasons.map((reason) => (
+                          <SelectItem key={reason.id} value={reason.id.toString()}>
+                            {reason.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setShowAddFineModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddFine} disabled={isSubmitting}>
-                    {isSubmitting ? "Adding..." : "Add Fine"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+              </CardContent>
+            </Card>
           )}
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Fines</p>
-                <p className="text-2xl font-bold">{totalFines}</p>
-              </div>
-              <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                <DollarSign className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Amount</p>
-                <p className="text-2xl font-bold">${totalAmount.toFixed(2)}</p>
-              </div>
-              <div className="h-12 w-12 bg-success/10 rounded-lg flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-success" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Active Players</p>
-                <p className="text-2xl font-bold">{activePlayers}</p>
-              </div>
-              <div className="h-12 w-12 bg-blue-500/10 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-blue-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">This Month</p>
-                <p className="text-2xl font-bold">{pendingFines}</p>
-              </div>
-              <div className="h-12 w-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
-                <Clock className="h-6 w-6 text-amber-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Player</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Added By</TableHead>
+                    {canDeleteFines && <TableHead>Actions</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedFines.map((fine) => (
+                    <TableRow 
+                      key={fine.id} 
+                      className={fine.deletedAt ? "opacity-50" : ""}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                            <span className="text-xs font-medium">
+                              {fine.playerName.charAt(0)}
+                            </span>
+                          </div>
+                          <span className="font-medium">{fine.playerName}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <span className="font-medium">{fine.fineReasonName}</span>
+                          {fine.deletedAt && (
+                            <Badge variant="outline" className="ml-2 text-xs">
+                              Deleted
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="destructive" className="font-mono">
+                          ${fine.amount.toFixed(2)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground">
+                          {format(new Date(fine.fineDate), 'MMM dd, yyyy')}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground">
+                          {fine.addedByName}
+                        </span>
+                      </TableCell>
+                      {canDeleteFines && (
+                        <TableCell>
+                          {!fine.deletedAt && (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="outline" size="sm">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Fine</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete this fine? This action can be undone later.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction 
+                                    onClick={() => handleDeleteFine(fine.id)}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          )}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              
+              {fines.length === 0 && (
+                <div className="text-center py-8">
+                  <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No fines found matching your criteria</p>
+                </div>
+              )}
 
-      {canAddFines && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Quick Fine Actions</CardTitle>
-            <CardDescription>Common fines for quick entry</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {fineReasons.slice(0, 4).map((reason) => (
-                <Button
-                  key={reason.id}
-                  variant="outline"
-                  className="h-auto p-4 flex flex-col items-center gap-2"
-                  onClick={() => handleQuickFine(reason.id, reason.defaultAmount)}
-                >
-                  <span className="font-medium">{reason.name}</span>
-                  <Badge variant="secondary">${reason.defaultAmount}</Badge>
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-6 py-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Showing {Math.min((currentPage - 1) * itemsPerPage + 1, fines.length)} to{' '}
+                    {Math.min(currentPage * itemsPerPage, fines.length)} of {fines.length} entries
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {showFilters && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Filters
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>Search</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        {/* Export Tab */}
+        <TabsContent value="export" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileDown className="h-5 w-5" />
+                Export Fines Data
+              </CardTitle>
+              <CardDescription>
+                Download fines data in CSV format with optional filters
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label>Player Filter</Label>
+                  <Select value={selectedPlayer} onValueChange={setSelectedPlayer}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Players</SelectItem>
+                      {players.map((player) => (
+                        <SelectItem key={player.id} value={player.id.toString()}>
+                          {player.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Fine Reason Filter</Label>
+                  <Select value={selectedReason} onValueChange={setSelectedReason}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Reasons</SelectItem>
+                      {fineReasons.map((reason) => (
+                        <SelectItem key={reason.id} value={reason.id.toString()}>
+                          {reason.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Search Filter</Label>
                   <Input
-                    placeholder="Search fines..."
+                    placeholder="Search term..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
                   />
                 </div>
               </div>
-              <div>
-                <Label>Player</Label>
-                <Select value={selectedPlayer} onValueChange={setSelectedPlayer}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Players</SelectItem>
-                    {players.map((player) => (
-                      <SelectItem key={player.id} value={player.id.toString()}>
-                        {player.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Fine Reason</Label>
-                <Select value={selectedReason} onValueChange={setSelectedReason}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Reasons</SelectItem>
-                    {fineReasons.map((reason) => (
-                      <SelectItem key={reason.id} value={reason.id.toString()}>
-                        {reason.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                {canViewDeleted && (
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="showDeleted"
-                      checked={showDeleted}
-                      onChange={(e) => setShowDeleted(e.target.checked)}
-                    />
-                    <Label htmlFor="showDeleted">Show Deleted</Label>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Recent Fines ({fines.length})</span>
-            {canViewDeleted && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowDeleted(!showDeleted)}
-                className="flex items-center gap-2"
-              >
-                {showDeleted ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                {showDeleted ? 'Hide Deleted' : 'Show Deleted'}
-              </Button>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Player</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Added By</TableHead>
-                {canDeleteFines && <TableHead>Actions</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {fines.map((fine) => (
-                <TableRow 
-                  key={fine.id} 
-                  className={fine.deletedAt ? "opacity-50" : ""}
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                        <span className="text-xs font-medium">
-                          {fine.playerName.charAt(0)}
-                        </span>
-                      </div>
-                      <span className="font-medium">{fine.playerName}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <span className="font-medium">{fine.fineReasonName}</span>
-                      {fine.deletedAt && (
-                        <Badge variant="outline" className="ml-2 text-xs">
-                          Deleted
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="destructive" className="font-mono">
-                      ${fine.amount.toFixed(2)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm text-muted-foreground">
-                      {format(new Date(fine.fineDate), 'MMM dd, yyyy')}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm text-muted-foreground">
-                      {fine.addedByName}
-                    </span>
-                  </TableCell>
-                  {canDeleteFines && (
-                    <TableCell>
-                      {!fine.deletedAt && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Fine</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Are you sure you want to delete this fine? This action can be undone later.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction 
-                                onClick={() => handleDeleteFine(fine.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {fines.length === 0 && (
-            <div className="text-center py-8">
-              <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">No fines found matching your criteria</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              <div className="flex flex-col gap-4">
+                <div>
+                  <Label>Date Range (Optional)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="date"
+                      value={dateRange.from ? format(dateRange.from, 'yyyy-MM-dd') : ''}
+                      onChange={(e) => setDateRange(prev => ({ 
+                        ...prev, 
+                        from: e.target.value ? new Date(e.target.value) : undefined 
+                      }))}
+                      placeholder="From date"
+                    />
+                    <Input
+                      type="date"
+                      value={dateRange.to ? format(dateRange.to, 'yyyy-MM-dd') : ''}
+                      onChange={(e) => setDateRange(prev => ({ 
+                        ...prev, 
+                        to: e.target.value ? new Date(e.target.value) : undefined 
+                      }))}
+                      placeholder="To date"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t">
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      Export will include {fines.length} fines based on current filters
+                    </p>
+                  </div>
+                  <Button onClick={handleExport} className="flex items-center gap-2">
+                    <Download className="h-4 w-4" />
+                    Download CSV
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

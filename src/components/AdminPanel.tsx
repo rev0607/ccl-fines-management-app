@@ -26,7 +26,9 @@ import {
   ChevronRight,
   Undo,
   PanelRightOpen,
-  Users
+  Users,
+  Plus,
+  Edit
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -988,7 +990,66 @@ function ManageUsersTab({
   currentUserRole: 'admin' | 'superadmin';
 }) {
   const [showPromoteConfirm, setShowPromoteConfirm] = useState<UserRole | null>(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRole | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [userForm, setUserForm] = useState({
+    email: '',
+    role: 'viewer' as 'viewer' | 'admin'
+  });
+
+  const handleAddUser = async () => {
+    if (!userForm.email || !userForm.role) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    // Check if user with this email already exists
+    const existingUser = users.find(u => u.email.toLowerCase() === userForm.email.toLowerCase());
+    if (existingUser) {
+      toast.error("User with this email already exists");
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: userForm.email,
+          role: userForm.role,
+          name: userForm.email.split('@')[0] // Use email prefix as default name
+        }),
+      });
+
+      if (response.ok) {
+        const newUser = await response.json();
+        setUsers([...users, {
+          id: newUser.id,
+          email: newUser.email,
+          name: newUser.name,
+          role: newUser.role,
+          createdAt: newUser.createdAt
+        }]);
+        setUserForm({ email: '', role: 'viewer' });
+        setShowAddUserModal(false);
+        toast.success(`User added successfully with ${userForm.role} access`);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to add user');
+      }
+    } catch (error) {
+      console.error('Add user error:', error);
+      toast.error('Failed to add user');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   const handleRoleChange = async (userId: number, newRole: 'viewer' | 'admin' | 'super_admin') => {
     if (newRole === 'super_admin') {
@@ -1071,18 +1132,108 @@ function ManageUsersTab({
     }
   };
 
+  const handleEditUser = async () => {
+    if (!editingUser) return;
+
+    setIsUpdating(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/users/${editingUser.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: editingUser.name,
+          email: editingUser.email
+        }),
+      });
+
+      if (response.ok) {
+        const updatedUsers = users.map(u => 
+          u.id === editingUser.id ? editingUser : u
+        );
+        setUsers(updatedUsers);
+        setEditingUser(null);
+        toast.success('User updated successfully');
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to update user');
+      }
+    } catch (error) {
+      console.error('Update user error:', error);
+      toast.error('Failed to update user');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-display font-bold">Manage Users</h2>
-        <p className="text-muted-foreground">Manage user roles and permissions (Super Admin only)</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-display font-bold">Manage Users</h2>
+          <p className="text-muted-foreground">Manage user roles and permissions (Super Admin only)</p>
+        </div>
+        <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
+          <DialogTrigger asChild>
+            <Button className="flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add New User</DialogTitle>
+              <DialogDescription>
+                Add a user by email and assign a role. The user must have already signed up to the system.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="user-email">Email Address *</Label>
+                <Input
+                  id="user-email"
+                  type="email"
+                  value={userForm.email}
+                  onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="user@example.com"
+                />
+              </div>
+              <div>
+                <Label htmlFor="user-role">Assign Role *</Label>
+                <Select 
+                  value={userForm.role} 
+                  onValueChange={(value: 'viewer' | 'admin') => setUserForm(prev => ({ ...prev, role: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddUserModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleAddUser} disabled={isUpdating}>
+                {isUpdating ? 'Adding...' : 'Add User'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />
-            User Roles & Permissions
+            User Roles & Permissions ({users.length} users)
           </CardTitle>
           <CardDescription>
             Control user access levels and permissions. Only Super Admin can manage user roles.
@@ -1139,6 +1290,55 @@ function ManageUsersTab({
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
+                      <Dialog open={editingUser?.id === user.id} onOpenChange={(open) => {
+                        if (!open) setEditingUser(null);
+                        else setEditingUser({ ...user });
+                      }}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Edit User</DialogTitle>
+                            <DialogDescription>
+                              Update user information
+                            </DialogDescription>
+                          </DialogHeader>
+                          {editingUser && (
+                            <div className="space-y-4">
+                              <div>
+                                <Label>Name</Label>
+                                <Input
+                                  value={editingUser.name}
+                                  onChange={(e) => setEditingUser(prev => 
+                                    prev ? { ...prev, name: e.target.value } : null
+                                  )}
+                                />
+                              </div>
+                              <div>
+                                <Label>Email</Label>
+                                <Input
+                                  value={editingUser.email}
+                                  onChange={(e) => setEditingUser(prev => 
+                                    prev ? { ...prev, email: e.target.value } : null
+                                  )}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setEditingUser(null)}>
+                              Cancel
+                            </Button>
+                            <Button onClick={handleEditUser} disabled={isUpdating}>
+                              {isUpdating ? 'Saving...' : 'Save Changes'}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+
                       {user.role === 'viewer' && (
                         <Button
                           variant="outline"
