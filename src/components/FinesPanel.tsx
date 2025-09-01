@@ -23,34 +23,39 @@ import {
   Undo, 
   PanelTop,
   Fullscreen,
-  TableRowsSplit
+  TableRowsSplit,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 
+// API Types based on database schema
 interface Fine {
-  id: string;
-  playerId: string;
+  id: number;
+  playerId: number;
   playerName: string;
-  playerAvatar?: string;
-  reason: string;
+  fineReasonId: number;
+  fineReason: string;
   amount: number;
-  date: string;
-  addedBy: string;
-  addedByName: string;
-  isDeleted?: boolean;
-  deletedAt?: string;
+  fineDate: string;
+  addedByUserId: number;
+  addedByUserName: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Player {
-  id: string;
+  id: number;
   name: string;
-  avatar?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface FineReason {
-  id: string;
-  name: string;
+  id: number;
+  reason: string;
   defaultAmount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface QuickFine {
@@ -63,32 +68,13 @@ type UserRole = 'viewer' | 'admin' | 'superadmin';
 type ViewMode = 'compact' | 'table';
 type TimePeriod = 'weekly' | 'monthly' | 'quarterly' | 'half-yearly' | 'yearly' | 'custom';
 
-const QUICK_FINES: QuickFine[] = [
-  { reason: 'Late Arrival', amount: 50, label: 'Late Arrival ₹50' },
-  { reason: 'Missed Practice', amount: 100, label: 'Missed Practice ₹100' },
-  { reason: 'Equipment Missing', amount: 75, label: 'Equipment Missing ₹75' },
-  { reason: 'Unsporting Behavior', amount: 200, label: 'Unsporting Behavior ₹200' },
-];
-
-const MOCK_PLAYERS: Player[] = [
-  { id: '1', name: 'Rajesh Kumar', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face' },
-  { id: '2', name: 'Priya Sharma', avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b1c5?w=100&h=100&fit=crop&crop=face' },
-  { id: '3', name: 'Amit Patel', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face' },
-  { id: '4', name: 'Neha Singh', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face' },
-];
-
-const MOCK_REASONS: FineReason[] = [
-  { id: '1', name: 'Late Arrival', defaultAmount: 50 },
-  { id: '2', name: 'Missed Practice', defaultAmount: 100 },
-  { id: '3', name: 'Equipment Missing', defaultAmount: 75 },
-  { id: '4', name: 'Unsporting Behavior', defaultAmount: 200 },
-  { id: '5', name: 'Uniform Violation', defaultAmount: 30 },
-];
-
 export default function FinesPanel() {
-  const [userRole] = useState<UserRole>('admin'); // Mock role
+  const [userRole] = useState<UserRole>('admin'); // Mock role - will be replaced with auth
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [fines, setFines] = useState<Fine[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [fineReasons, setFineReasons] = useState<FineReason[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('compact');
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -97,16 +83,16 @@ export default function FinesPanel() {
   // Filter states
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('monthly');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
-  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
+  const [selectedPlayers, setSelectedPlayers] = useState<number[]>([]);
+  const [selectedReasons, setSelectedReasons] = useState<number[]>([]);
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   
   // Add fine form
   const [addFineForm, setAddFineForm] = useState({
     playerId: '',
-    reason: '',
+    fineReasonId: '',
     amount: 0,
-    date: new Date().toISOString().split('T')[0]
+    fineDate: new Date().toISOString().split('T')[0]
   });
   
   // Export options
@@ -116,59 +102,120 @@ export default function FinesPanel() {
     includeBranding: true
   });
 
-  // Mock data loading
+  // API Functions
+  const fetchFines = async (filters?: {
+    search?: string;
+    playerId?: number;
+    fineReasonId?: number;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.search) params.append('search', filters.search);
+      if (filters?.playerId) params.append('player_id', filters.playerId.toString());
+      if (filters?.fineReasonId) params.append('fine_reason_id', filters.fineReasonId.toString());
+      if (filters?.startDate) params.append('start_date', filters.startDate);
+      if (filters?.endDate) params.append('end_date', filters.endDate);
+      
+      const response = await fetch(`/api/fines?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch fines');
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching fines:', error);
+      toast.error('Failed to load fines');
+      return [];
+    }
+  };
+
+  const fetchPlayers = async () => {
+    try {
+      const response = await fetch('/api/players');
+      if (!response.ok) throw new Error('Failed to fetch players');
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching players:', error);
+      toast.error('Failed to load players');
+      return [];
+    }
+  };
+
+  const fetchFineReasons = async () => {
+    try {
+      const response = await fetch('/api/fine-reasons');
+      if (!response.ok) throw new Error('Failed to fetch fine reasons');
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching fine reasons:', error);
+      toast.error('Failed to load fine reasons');
+      return [];
+    }
+  };
+
+  // Load initial data
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const mockFines: Fine[] = [
-        {
-          id: '1',
-          playerId: '1',
-          playerName: 'Rajesh Kumar',
-          playerAvatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-          reason: 'Late Arrival',
-          amount: 50,
-          date: '2024-01-15',
-          addedBy: 'admin1',
-          addedByName: 'Admin User'
-        },
-        {
-          id: '2',
-          playerId: '2',
-          playerName: 'Priya Sharma',
-          playerAvatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b1c5?w=100&h=100&fit=crop&crop=face',
-          reason: 'Missed Practice',
-          amount: 100,
-          date: '2024-01-14',
-          addedBy: 'admin1',
-          addedByName: 'Admin User'
-        },
-        {
-          id: '3',
-          playerId: '3',
-          playerName: 'Amit Patel',
-          playerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face',
-          reason: 'Equipment Missing',
-          amount: 75,
-          date: '2024-01-13',
-          addedBy: 'superadmin1',
-          addedByName: 'Super Admin',
-          isDeleted: true,
-          deletedAt: '2024-01-16'
-        },
-      ];
-      
-      setFines(mockFines);
-      setIsLoading(false);
+      try {
+        const [finesData, playersData, reasonsData] = await Promise.all([
+          fetchFines(),
+          fetchPlayers(),
+          fetchFineReasons()
+        ]);
+        
+        setFines(finesData);
+        setPlayers(playersData);
+        setFineReasons(reasonsData);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        toast.error('Failed to load data');
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     loadData();
   }, []);
 
-  // Debounced search
+  // Generate date range based on time period
+  const getDateRange = useCallback((period: TimePeriod) => {
+    const now = new Date();
+    const start = new Date();
+    
+    switch (period) {
+      case 'weekly':
+        start.setDate(now.getDate() - 7);
+        break;
+      case 'monthly':
+        start.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarterly':
+        start.setMonth(now.getMonth() - 3);
+        break;
+      case 'half-yearly':
+        start.setMonth(now.getMonth() - 6);
+        break;
+      case 'yearly':
+        start.setFullYear(now.getFullYear() - 1);
+        break;
+      case 'custom':
+        return {
+          start: customDateRange.start,
+          end: customDateRange.end
+        };
+      default:
+        return { start: '', end: '' };
+    }
+    
+    return {
+      start: start.toISOString().split('T')[0],
+      end: now.toISOString().split('T')[0]
+    };
+  }, [customDateRange]);
+
+  // Debounced search with API calls
   const debouncedSearch = useCallback(
     useMemo(() => {
       const debounce = (func: Function, wait: number) => {
@@ -178,62 +225,102 @@ export default function FinesPanel() {
           timeout = setTimeout(() => func.apply(null, args), wait);
         };
       };
-      return debounce((query: string) => {
-        // In real app, this would trigger API search
-        console.log('Searching:', query);
+      return debounce(async (query: string) => {
+        const dateRange = getDateRange(timePeriod);
+        const filters = {
+          search: query,
+          playerId: selectedPlayers.length === 1 ? selectedPlayers[0] : undefined,
+          fineReasonId: selectedReasons.length === 1 ? selectedReasons[0] : undefined,
+          startDate: dateRange.start,
+          endDate: dateRange.end
+        };
+        
+        const newFines = await fetchFines(filters);
+        setFines(newFines);
       }, 300);
-    }, []),
-    []
+    }, [timePeriod, selectedPlayers, selectedReasons, getDateRange]),
+    [timePeriod, selectedPlayers, selectedReasons, getDateRange]
   );
 
+  // Trigger search when filters change
   useEffect(() => {
-    if (searchQuery) {
-      debouncedSearch(searchQuery);
-    }
-  }, [searchQuery, debouncedSearch]);
+    const searchFines = async () => {
+      const dateRange = getDateRange(timePeriod);
+      const filters = {
+        search: searchQuery,
+        playerId: selectedPlayers.length === 1 ? selectedPlayers[0] : undefined,
+        fineReasonId: selectedReasons.length === 1 ? selectedReasons[0] : undefined,
+        startDate: dateRange.start,
+        endDate: dateRange.end
+      };
+      
+      const newFines = await fetchFines(filters);
+      setFines(newFines);
+    };
 
-  // Filtered fines
-  const filteredFines = useMemo(() => {
-    return fines.filter(fine => {
-      const matchesSearch = !searchQuery || 
-        fine.playerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        fine.reason.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesPlayer = selectedPlayers.length === 0 || selectedPlayers.includes(fine.playerId);
-      const matchesReason = selectedReasons.length === 0 || selectedReasons.includes(fine.reason);
-      
-      return matchesSearch && matchesPlayer && matchesReason;
-    });
-  }, [fines, searchQuery, selectedPlayers, selectedReasons]);
+    if (!isLoading) {
+      if (searchQuery) {
+        debouncedSearch(searchQuery);
+      } else {
+        searchFines();
+      }
+    }
+  }, [searchQuery, timePeriod, selectedPlayers, selectedReasons, customDateRange, isLoading, debouncedSearch, getDateRange]);
+
+  // Generate quick fines based on available reasons
+  const quickFines = useMemo<QuickFine[]>(() => {
+    return fineReasons.slice(0, 4).map(reason => ({
+      reason: reason.reason,
+      amount: reason.defaultAmount,
+      label: `${reason.reason} ₹${reason.defaultAmount}`
+    }));
+  }, [fineReasons]);
 
   // Form handlers
   const handleAddFine = async () => {
-    if (!addFineForm.playerId || !addFineForm.reason || addFineForm.amount <= 0) {
+    if (!addFineForm.playerId || !addFineForm.fineReasonId || addFineForm.amount <= 0) {
       toast.error('Please fill all required fields');
       return;
     }
 
-    const player = MOCK_PLAYERS.find(p => p.id === addFineForm.playerId);
-    const newFine: Fine = {
-      id: Date.now().toString(),
-      playerId: addFineForm.playerId,
-      playerName: player?.name || '',
-      playerAvatar: player?.avatar,
-      reason: addFineForm.reason,
-      amount: addFineForm.amount,
-      date: addFineForm.date,
-      addedBy: 'current-user',
-      addedByName: 'Current User'
-    };
+    setIsSubmitting(true);
+    try {
+      const response = await fetch('/api/fines', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          playerId: parseInt(addFineForm.playerId),
+          fineReasonId: parseInt(addFineForm.fineReasonId),
+          amount: addFineForm.amount,
+          fineDate: addFineForm.fineDate
+        })
+      });
 
-    setFines(prev => [newFine, ...prev]);
-    setAddFineForm({
-      playerId: '',
-      reason: '',
-      amount: 0,
-      date: new Date().toISOString().split('T')[0]
-    });
-    toast.success('Fine added successfully');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add fine');
+      }
+
+      const newFine = await response.json();
+      setFines(prev => [newFine, ...prev]);
+      
+      // Reset form
+      setAddFineForm({
+        playerId: '',
+        fineReasonId: '',
+        amount: 0,
+        fineDate: new Date().toISOString().split('T')[0]
+      });
+      
+      toast.success('Fine added successfully');
+    } catch (error) {
+      console.error('Error adding fine:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to add fine');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleQuickFine = async (quickFine: QuickFine) => {
@@ -242,52 +329,123 @@ export default function FinesPanel() {
       return;
     }
 
+    const reasonId = fineReasons.find(r => r.reason === quickFine.reason)?.id;
+    if (!reasonId) {
+      toast.error('Fine reason not found');
+      return;
+    }
+
     const updatedForm = {
       ...addFineForm,
-      reason: quickFine.reason,
+      fineReasonId: reasonId.toString(),
       amount: quickFine.amount
     };
     
     setAddFineForm(updatedForm);
     
-    // Auto-submit after a brief delay to show the form update
-    setTimeout(() => {
-      handleAddFine();
+    // Auto-submit after form update
+    setTimeout(async () => {
+      setIsSubmitting(true);
+      try {
+        const response = await fetch('/api/fines', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            playerId: parseInt(updatedForm.playerId),
+            fineReasonId: parseInt(updatedForm.fineReasonId),
+            amount: updatedForm.amount,
+            fineDate: updatedForm.fineDate
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to add fine');
+        }
+
+        const newFine = await response.json();
+        setFines(prev => [newFine, ...prev]);
+        
+        // Reset form
+        setAddFineForm({
+          playerId: '',
+          fineReasonId: '',
+          amount: 0,
+          fineDate: new Date().toISOString().split('T')[0]
+        });
+        
+        toast.success('Fine added successfully');
+      } catch (error) {
+        console.error('Error adding fine:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to add fine');
+      } finally {
+        setIsSubmitting(false);
+      }
     }, 100);
   };
 
-  const handleSoftDelete = async (fineId: string) => {
-    setFines(prev => prev.map(fine => 
-      fine.id === fineId 
-        ? { ...fine, isDeleted: true, deletedAt: new Date().toISOString() }
-        : fine
-    ));
-    toast.success('Fine deleted', {
-      action: {
-        label: 'Undo',
-        onClick: () => handleRestoreFine(fineId)
-      }
-    });
-  };
+  const handleSoftDelete = async (fineId: number) => {
+    try {
+      const response = await fetch(`/api/fines/${fineId}`, {
+        method: 'DELETE'
+      });
 
-  const handleRestoreFine = async (fineId: string) => {
-    setFines(prev => prev.map(fine => 
-      fine.id === fineId 
-        ? { ...fine, isDeleted: false, deletedAt: undefined }
-        : fine
-    ));
-    toast.success('Fine restored');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete fine');
+      }
+
+      // Remove from local state
+      setFines(prev => prev.filter(fine => fine.id !== fineId));
+      
+      toast.success('Fine deleted successfully');
+    } catch (error) {
+      console.error('Error deleting fine:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete fine');
+    }
   };
 
   const handleExport = async () => {
-    // Mock export functionality
-    toast.success(`Exporting ${exportOptions.format.toUpperCase()} file...`);
-    setShowExportModal(false);
+    try {
+      const dateRange = getDateRange(timePeriod);
+      const params = new URLSearchParams();
+      
+      if (searchQuery) params.append('search', searchQuery);
+      if (selectedPlayers.length === 1) params.append('player_id', selectedPlayers[0].toString());
+      if (selectedReasons.length === 1) params.append('fine_reason_id', selectedReasons[0].toString());
+      if (dateRange.start) params.append('start_date', dateRange.start);
+      if (dateRange.end) params.append('end_date', dateRange.end);
+
+      const response = await fetch(`/api/fines/export?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to export fines');
+      }
+
+      // Create download link
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `ccl_fines_export_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast.success('Export completed successfully');
+      setShowExportModal(false);
+    } catch (error) {
+      console.error('Error exporting fines:', error);
+      toast.error('Failed to export fines');
+    }
   };
 
   const handleShare = async () => {
-    // Mock share functionality
-    const message = `CCL Fines Report - ${filteredFines.length} fines found`;
+    const message = `CCL Fines Report - ${fines.length} fines found. Total amount: ₹${fines.reduce((sum, fine) => sum + fine.amount, 0)}`;
     const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
     
     if (typeof window !== 'undefined') {
@@ -298,13 +456,13 @@ export default function FinesPanel() {
 
   // Update amount when reason changes
   useEffect(() => {
-    if (addFineForm.reason) {
-      const reason = MOCK_REASONS.find(r => r.name === addFineForm.reason);
+    if (addFineForm.fineReasonId) {
+      const reason = fineReasons.find(r => r.id.toString() === addFineForm.fineReasonId);
       if (reason) {
         setAddFineForm(prev => ({ ...prev, amount: reason.defaultAmount }));
       }
     }
-  }, [addFineForm.reason]);
+  }, [addFineForm.fineReasonId, fineReasons]);
 
   const canAddFine = userRole === 'admin' || userRole === 'superadmin';
   const canDelete = userRole === 'superadmin';
@@ -400,11 +558,10 @@ export default function FinesPanel() {
                         <SelectValue placeholder="Select player" />
                       </SelectTrigger>
                       <SelectContent>
-                        {MOCK_PLAYERS.map(player => (
-                          <SelectItem key={player.id} value={player.id}>
+                        {players.map(player => (
+                          <SelectItem key={player.id} value={player.id.toString()}>
                             <div className="flex items-center gap-2">
                               <Avatar className="h-6 w-6">
-                                <AvatarImage src={player.avatar} />
                                 <AvatarFallback>{player.name[0]}</AvatarFallback>
                               </Avatar>
                               {player.name}
@@ -417,14 +574,14 @@ export default function FinesPanel() {
                   
                   <div>
                     <Label htmlFor="reason">Reason</Label>
-                    <Select value={addFineForm.reason} onValueChange={(value) => setAddFineForm(prev => ({ ...prev, reason: value }))}>
+                    <Select value={addFineForm.fineReasonId} onValueChange={(value) => setAddFineForm(prev => ({ ...prev, fineReasonId: value }))}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select reason" />
                       </SelectTrigger>
                       <SelectContent>
-                        {MOCK_REASONS.map(reason => (
-                          <SelectItem key={reason.id} value={reason.name}>
-                            {reason.name} (₹{reason.defaultAmount})
+                        {fineReasons.map(reason => (
+                          <SelectItem key={reason.id} value={reason.id.toString()}>
+                            {reason.reason} (₹{reason.defaultAmount})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -446,8 +603,8 @@ export default function FinesPanel() {
                     <Input
                       id="date"
                       type="date"
-                      value={addFineForm.date}
-                      onChange={(e) => setAddFineForm(prev => ({ ...prev, date: e.target.value }))}
+                      value={addFineForm.fineDate}
+                      onChange={(e) => setAddFineForm(prev => ({ ...prev, fineDate: e.target.value }))}
                     />
                   </div>
                 </div>
@@ -455,26 +612,37 @@ export default function FinesPanel() {
                 <div>
                   <Label>Quick Fine Buttons</Label>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                    {QUICK_FINES.map((quickFine, index) => (
+                    {quickFines.map((quickFine, index) => (
                       <Button
                         key={index}
                         variant="outline"
                         size="sm"
                         onClick={() => handleQuickFine(quickFine)}
-                        disabled={!addFineForm.playerId}
+                        disabled={!addFineForm.playerId || isSubmitting}
                         className="text-xs"
                       >
-                        {quickFine.label}
+                        {isSubmitting ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          quickFine.label
+                        )}
                       </Button>
                     ))}
                   </div>
                 </div>
                 
                 <div className="flex gap-2">
-                  <Button onClick={handleAddFine} className="flex-1">
-                    Add Fine
+                  <Button onClick={handleAddFine} className="flex-1" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Adding Fine...
+                      </>
+                    ) : (
+                      'Add Fine'
+                    )}
                   </Button>
-                  <Button variant="outline" onClick={() => setShowAddPanel(false)}>
+                  <Button variant="outline" onClick={() => setShowAddPanel(false)} disabled={isSubmitting}>
                     Cancel
                   </Button>
                 </div>
@@ -530,7 +698,7 @@ export default function FinesPanel() {
               <div>
                 <Label>Players</Label>
                 <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
-                  {MOCK_PLAYERS.map(player => (
+                  {players.map(player => (
                     <div key={player.id} className="flex items-center space-x-2">
                       <Checkbox
                         id={`player-${player.id}`}
@@ -545,7 +713,6 @@ export default function FinesPanel() {
                       />
                       <label htmlFor={`player-${player.id}`} className="flex items-center gap-2 cursor-pointer">
                         <Avatar className="h-6 w-6">
-                          <AvatarImage src={player.avatar} />
                           <AvatarFallback>{player.name[0]}</AvatarFallback>
                         </Avatar>
                         {player.name}
@@ -558,21 +725,21 @@ export default function FinesPanel() {
               <div>
                 <Label>Reasons</Label>
                 <div className="mt-2 space-y-2 max-h-40 overflow-y-auto">
-                  {MOCK_REASONS.map(reason => (
+                  {fineReasons.map(reason => (
                     <div key={reason.id} className="flex items-center space-x-2">
                       <Checkbox
                         id={`reason-${reason.id}`}
-                        checked={selectedReasons.includes(reason.name)}
+                        checked={selectedReasons.includes(reason.id)}
                         onCheckedChange={(checked) => {
                           if (checked) {
-                            setSelectedReasons(prev => [...prev, reason.name]);
+                            setSelectedReasons(prev => [...prev, reason.id]);
                           } else {
-                            setSelectedReasons(prev => prev.filter(name => name !== reason.name));
+                            setSelectedReasons(prev => prev.filter(id => id !== reason.id));
                           }
                         }}
                       />
                       <label htmlFor={`reason-${reason.id}`} className="cursor-pointer">
-                        {reason.name}
+                        {reason.reason}
                       </label>
                     </div>
                   ))}
@@ -600,9 +767,9 @@ export default function FinesPanel() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            Fines ({filteredFines.length})
+            Fines ({fines.length})
             <Badge variant="secondary">
-              Total: ₹{filteredFines.reduce((sum, fine) => sum + (fine.isDeleted ? 0 : fine.amount), 0)}
+              Total: ₹{fines.reduce((sum, fine) => sum + fine.amount, 0)}
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -613,7 +780,7 @@ export default function FinesPanel() {
                 <Skeleton key={i} className="h-16 w-full" />
               ))}
             </div>
-          ) : filteredFines.length === 0 ? (
+          ) : fines.length === 0 ? (
             <div className="text-center py-12">
               <SearchX className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No fines found</h3>
@@ -628,33 +795,29 @@ export default function FinesPanel() {
             </div>
           ) : viewMode === 'compact' ? (
             <div className="space-y-3">
-              {filteredFines.map(fine => (
+              {fines.map(fine => (
                 <div
                   key={fine.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border ${
-                    fine.isDeleted ? 'opacity-50 bg-muted/20' : 'bg-card hover:bg-muted/50'
-                  } transition-colors`}
+                  className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarImage src={fine.playerAvatar} />
                     <AvatarFallback>{fine.playerName[0]}</AvatarFallback>
                   </Avatar>
                   
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{fine.playerName}</span>
-                      {fine.isDeleted && <Badge variant="destructive" className="text-xs">Deleted</Badge>}
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>{fine.reason}</span>
+                      <span>{fine.fineReason}</span>
                       <span>•</span>
-                      <span>{new Date(fine.date).toLocaleDateString()}</span>
+                      <span>{new Date(fine.fineDate).toLocaleDateString()}</span>
                     </div>
                   </div>
                   
                   <div className="text-right">
                     <div className="font-semibold">₹{fine.amount}</div>
-                    <div className="text-xs text-muted-foreground">by {fine.addedByName}</div>
+                    <div className="text-xs text-muted-foreground">by {fine.addedByUserName}</div>
                   </div>
                   
                   <DropdownMenu>
@@ -665,28 +828,19 @@ export default function FinesPanel() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem>View Details</DropdownMenuItem>
-                      {userRole !== 'viewer' && !fine.isDeleted && (
+                      {userRole !== 'viewer' && (
                         <DropdownMenuItem>Edit Fine</DropdownMenuItem>
                       )}
-                      {fine.isDeleted ? (
-                        canDelete && (
-                          <DropdownMenuItem onClick={() => handleRestoreFine(fine.id)}>
-                            <Undo className="h-4 w-4 mr-2" />
-                            Restore
+                      {canDelete && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            className="text-destructive"
+                            onClick={() => handleSoftDelete(fine.id)}
+                          >
+                            Delete Fine
                           </DropdownMenuItem>
-                        )
-                      ) : (
-                        canDelete && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem 
-                              className="text-destructive"
-                              onClick={() => handleSoftDelete(fine.id)}
-                            >
-                              Delete Fine
-                            </DropdownMenuItem>
-                          </>
-                        )
+                        </>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -707,24 +861,22 @@ export default function FinesPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredFines.map(fine => (
-                    <TableRow key={fine.id} className={fine.isDeleted ? 'opacity-50' : ''}>
+                  {fines.map(fine => (
+                    <TableRow key={fine.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Avatar className="h-8 w-8">
-                            <AvatarImage src={fine.playerAvatar} />
                             <AvatarFallback>{fine.playerName[0]}</AvatarFallback>
                           </Avatar>
                           <div>
                             <div className="font-medium">{fine.playerName}</div>
-                            {fine.isDeleted && <Badge variant="destructive" className="text-xs">Deleted</Badge>}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>{fine.reason}</TableCell>
+                      <TableCell>{fine.fineReason}</TableCell>
                       <TableCell className="font-semibold">₹{fine.amount}</TableCell>
-                      <TableCell>{new Date(fine.date).toLocaleDateString()}</TableCell>
-                      <TableCell>{fine.addedByName}</TableCell>
+                      <TableCell>{new Date(fine.fineDate).toLocaleDateString()}</TableCell>
+                      <TableCell>{fine.addedByUserName}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -734,28 +886,19 @@ export default function FinesPanel() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem>View Details</DropdownMenuItem>
-                            {userRole !== 'viewer' && !fine.isDeleted && (
+                            {userRole !== 'viewer' && (
                               <DropdownMenuItem>Edit Fine</DropdownMenuItem>
                             )}
-                            {fine.isDeleted ? (
-                              canDelete && (
-                                <DropdownMenuItem onClick={() => handleRestoreFine(fine.id)}>
-                                  <Undo className="h-4 w-4 mr-2" />
-                                  Restore
+                            {canDelete && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  className="text-destructive"
+                                  onClick={() => handleSoftDelete(fine.id)}
+                                >
+                                  Delete Fine
                                 </DropdownMenuItem>
-                              )
-                            ) : (
-                              canDelete && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
-                                    className="text-destructive"
-                                    onClick={() => handleSoftDelete(fine.id)}
-                                  >
-                                    Delete Fine
-                                  </DropdownMenuItem>
-                                </>
-                              )
+                              </>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -788,7 +931,7 @@ export default function FinesPanel() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="excel">Excel (.xlsx)</SelectItem>
-                  <SelectItem value="pdf">PDF Document</SelectItem>
+                  <SelectItem value="pdf">CSV File (.csv)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
