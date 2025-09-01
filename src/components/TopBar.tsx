@@ -1,202 +1,198 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
+  DropdownMenuLabel, 
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { ChevronDown } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { 
+  User, 
+  LogOut, 
+  Settings, 
+  Moon, 
+  Sun, 
+  Bell,
+  Shield,
+  Crown
+} from "lucide-react"
 
-interface TopBarProps {
-  currentTab?: string
-  user?: {
-    name?: string
-    email?: string
-    avatar?: string
-    role?: string
-  }
-  onProfileClick?: () => void
-  onSignOut?: () => void
+interface TopBarUser {
+  id: number;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  role: "viewer" | "admin" | "superadmin";
 }
 
-export default function TopBar({ 
-  currentTab = "Fines", 
-  user = {
-    name: "John Doe",
-    email: "john@example.com",
-    role: "Admin"
-  },
-  onProfileClick,
-  onSignOut 
-}: TopBarProps) {
-  const [theme, setTheme] = useState<"light" | "dark">("light")
-  const [mounted, setMounted] = useState(false)
+interface TopBarProps {
+  currentTab: string;
+  user?: TopBarUser;
+  onProfileClick: () => void;
+  onSignOut: () => void;
+}
 
-  // Handle theme initialization and persistence
-  useEffect(() => {
-    setMounted(true)
-    const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-    const initialTheme = savedTheme || systemTheme
-    
-    setTheme(initialTheme)
-    document.documentElement.classList.toggle("dark", initialTheme === "dark")
-  }, [])
+export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: TopBarProps) {
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const toggleTheme = () => {
-    const newTheme = theme === "light" ? "dark" : "light"
-    setTheme(newTheme)
-    localStorage.setItem("theme", newTheme)
-    document.documentElement.classList.toggle("dark", newTheme === "dark")
-  }
+    setIsDarkMode(!isDarkMode);
+    // In a real app, this would update the theme
+    document.documentElement.classList.toggle("dark");
+  };
 
-  const handleProfileClick = () => {
-    onProfileClick?.()
-  }
-
-  const handleSignOut = () => {
-    onSignOut?.()
-  }
-
-  // Get user initials for avatar fallback
-  const getUserInitials = (name?: string) => {
-    if (!name) return "U"
+  const getUserInitials = (name: string) => {
     return name
       .split(" ")
-      .map(part => part.charAt(0))
+      .map(word => word.charAt(0))
       .join("")
       .toUpperCase()
-      .slice(0, 2)
-  }
+      .slice(0, 2);
+  };
 
-  // Don't render until mounted to avoid hydration mismatch
-  if (!mounted) {
-    return (
-      <header className="fixed top-0 left-0 right-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
-        <div className="flex items-center justify-between h-16 px-4 md:px-6">
-          <div className="flex items-center">
-            <h1 className="text-xl md:text-2xl font-display font-bold text-foreground">
-              CCLFines
-            </h1>
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case "superadmin":
+        return <Crown className="h-3 w-3" />;
+      case "admin":
+        return <Shield className="h-3 w-3" />;
+      default:
+        return <User className="h-3 w-3" />;
+    }
+  };
+
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case "superadmin":
+        return "destructive";
+      case "admin":
+        return "default";
+      default:
+        return "secondary";
+    }
+  };
+
+  const getRoleLabel = (role: string) => {
+    switch (role) {
+      case "superadmin":
+        return "Super Admin";
+      case "admin":
+        return "Admin";
+      default:
+        return "Viewer";
+    }
+  };
+
+  return (
+    <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
+      <div className="max-w-7xl mx-auto px-4 md:px-6">
+        <div className="flex items-center justify-between h-16">
+          {/* App Branding */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                <span className="text-primary-foreground font-bold text-sm">CF</span>
+              </div>
+              <div>
+                <h1 className="font-display font-bold text-lg">CCL Fines</h1>
+              </div>
+            </div>
           </div>
-          <div className="hidden sm:block">
-            <h2 className="text-lg font-display font-semibold text-foreground">
+
+          {/* Current Tab Title */}
+          <div className="flex-1 flex justify-center">
+            <h2 className="text-xl font-display font-semibold text-foreground">
               {currentTab}
             </h2>
           </div>
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-full bg-muted animate-pulse" />
+
+          {/* User Actions */}
+          <div className="flex items-center space-x-4">
+            {user && (
+              <>
+                {/* Notifications */}
+                <Button variant="ghost" size="sm" className="relative">
+                  <Bell className="h-4 w-4" />
+                  <span className="absolute -top-1 -right-1 h-3 w-3 bg-destructive rounded-full text-xs"></span>
+                </Button>
+
+                {/* User Menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="relative h-10 w-auto px-3 rounded-full">
+                      <div className="flex items-center space-x-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={user.avatarUrl} alt={user.name} />
+                          <AvatarFallback className="text-xs">
+                            {getUserInitials(user.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="hidden md:flex flex-col items-start">
+                          <span className="text-sm font-medium">{user.name}</span>
+                          <Badge 
+                            variant={getRoleColor(user.role)} 
+                            className="text-xs h-4 px-1 gap-1"
+                          >
+                            {getRoleIcon(user.role)}
+                            {getRoleLabel(user.role)}
+                          </Badge>
+                        </div>
+                      </div>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-56" align="end" forceMount>
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col space-y-1">
+                        <p className="text-sm font-medium leading-none">{user.name}</p>
+                        <p className="text-xs leading-none text-muted-foreground">
+                          {user.email}
+                        </p>
+                        <div className="pt-1">
+                          <Badge 
+                            variant={getRoleColor(user.role)} 
+                            className="text-xs h-5 px-2 gap-1"
+                          >
+                            {getRoleIcon(user.role)}
+                            {getRoleLabel(user.role)}
+                          </Badge>
+                        </div>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={onProfileClick}>
+                      <User className="mr-2 h-4 w-4" />
+                      <span>Profile</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {}}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Settings</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={toggleTheme}>
+                      {isDarkMode ? (
+                        <Sun className="mr-2 h-4 w-4" />
+                      ) : (
+                        <Moon className="mr-2 h-4 w-4" />
+                      )}
+                      <span>Toggle theme</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={onSignOut} className="text-destructive">
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Sign out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
           </div>
-        </div>
-      </header>
-    )
-  }
-
-  return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-card/95 backdrop-blur-sm border-b border-border">
-      <div className="flex items-center justify-between h-16 px-4 md:px-6">
-        {/* Left: Brand */}
-        <div className="flex items-center">
-          <h1 className="text-xl md:text-2xl font-display font-bold text-foreground tracking-tight">
-            <span className="hidden sm:inline">CCLFines</span>
-            <span className="sm:hidden">CCL</span>
-          </h1>
-        </div>
-
-        {/* Center: Current Tab Title */}
-        <div className="hidden sm:block">
-          <h2 className="text-lg font-display font-semibold text-foreground">
-            {currentTab}
-          </h2>
-        </div>
-        <div className="sm:hidden">
-          <h2 className="text-sm font-display font-medium text-muted-foreground">
-            {currentTab}
-          </h2>
-        </div>
-
-        {/* Right: Avatar Dropdown */}
-        <div className="flex items-center space-x-3">
-          {/* Role Status Indicator */}
-          {user.role && (
-            <div className="hidden md:flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full" />
-              <span className="text-sm font-medium text-muted-foreground">
-                {user.role}
-              </span>
-            </div>
-          )}
-
-          {/* Avatar Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                className="relative h-8 w-8 rounded-full p-0 hover:bg-accent"
-                aria-label="Open user menu"
-              >
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.avatar} alt={user.name || "User avatar"} />
-                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
-                    {getUserInitials(user.name)}
-                  </AvatarFallback>
-                </Avatar>
-                {user.role && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-card rounded-full md:hidden" />
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            
-            <DropdownMenuContent 
-              className="w-56" 
-              align="end" 
-              forceMount
-              aria-label="User menu"
-            >
-              <div className="flex items-center justify-start gap-2 p-2">
-                <div className="flex flex-col space-y-1 leading-none">
-                  {user.name && (
-                    <p className="font-medium text-sm text-foreground">{user.name}</p>
-                  )}
-                  {user.email && (
-                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                  )}
-                  {user.role && (
-                    <div className="flex items-center gap-1.5 md:hidden">
-                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                      <span className="text-xs text-muted-foreground">{user.role}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem onClick={handleProfileClick} className="cursor-pointer">
-                Profile
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem onClick={toggleTheme} className="cursor-pointer">
-                {theme === "light" ? "Switch to Dark" : "Switch to Light"}
-              </DropdownMenuItem>
-              
-              <DropdownMenuSeparator />
-              
-              <DropdownMenuItem 
-                onClick={handleSignOut} 
-                className="cursor-pointer text-destructive focus:text-destructive"
-              >
-                Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
     </header>
-  )
+  );
 }

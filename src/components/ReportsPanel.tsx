@@ -1,591 +1,544 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
 import { 
-  ChartBar, 
-  ChartColumnBig, 
-  FileChartColumn, 
-  FileChartLine, 
-  FileChartPie,
-  TableOfContents,
-  Section,
-  ChartNoAxesCombined,
-  PanelTop
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  Area,
+  AreaChart
+} from "recharts";
+import { 
+  TrendingUp, 
+  DollarSign, 
+  Users, 
+  AlertCircle, 
+  Download,
+  Calendar as CalendarIcon,
+  BarChart3,
+  PieChart as PieChartIcon,
+  Activity
 } from "lucide-react";
 import { toast } from "sonner";
-
-// Mock data for demonstration
-const mockFinesData = [
-  { id: 1, playerName: "John Smith", amount: 250, reason: "Late arrival", date: "2024-01-15", avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" },
-  { id: 2, playerName: "Mike Johnson", amount: 180, reason: "Missed training", date: "2024-01-16", avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face" },
-  { id: 3, playerName: "David Wilson", amount: 320, reason: "Equipment violation", date: "2024-01-17", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=40&h=40&fit=crop&crop=face" },
-  { id: 4, playerName: "Chris Brown", amount: 150, reason: "Late arrival", date: "2024-01-18", avatar: "https://images.unsplash.com/photo-1519244703995-f4e0f30006d5?w=40&h=40&fit=crop&crop=face" },
-  { id: 5, playerName: "Alex Davis", amount: 100, reason: "Uniform issue", date: "2024-01-19", avatar: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=40&h=40&fit=crop&crop=face" },
-];
-
-type TimePeriod = "weekly" | "monthly" | "quarterly" | "half-yearly" | "yearly" | "custom";
-type ActiveTab = "summary" | "visualization" | "breakdown";
+import { cn } from "@/lib/utils";
 
 interface ReportsPanelProps {
-  className?: string;
+  userRole?: "viewer" | "admin" | "superadmin";
 }
 
-export default function ReportsPanel({ className }: ReportsPanelProps) {
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>("monthly");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("summary");
-  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
-  const [selectedReason, setSelectedReason] = useState<string | null>(null);
-  const [expandedRows, setExpandedRows] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+interface SummaryData {
+  totalFines: number;
+  totalAmount: number;
+  uniquePlayers: number;
+  averageFineAmount: number;
+  mostCommonReason: string;
+  highestFinedPlayer: string;
+}
 
-  // Computed statistics
-  const stats = useMemo(() => {
-    const totalAmount = mockFinesData.reduce((sum, fine) => sum + fine.amount, 0);
-    const totalCount = mockFinesData.length;
-    
-    // Top players by total fines
-    const playerTotals = mockFinesData.reduce((acc, fine) => {
-      acc[fine.playerName] = (acc[fine.playerName] || 0) + fine.amount;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const topPlayers = Object.entries(playerTotals)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 3)
-      .map(([name, total]) => {
-        const player = mockFinesData.find(f => f.playerName === name);
-        return { name, total, avatar: player?.avatar };
-      });
+interface PlayerBreakdown {
+  playerName: string;
+  totalFines: number;
+  totalAmount: number;
+  averageAmount: number;
+  jerseyNumber: string;
+}
 
-    // Top reasons
-    const reasonTotals = mockFinesData.reduce((acc, fine) => {
-      acc[fine.reason] = (acc[fine.reason] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const topReasons = Object.entries(reasonTotals)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 3);
+interface ReasonBreakdown {
+  reasonName: string;
+  count: number;
+  totalAmount: number;
+  averageAmount: number;
+  percentage: number;
+}
 
-    // Leaderboard
-    const leaderboard = Object.entries(playerTotals)
-      .sort(([,a], [,b]) => b - a)
-      .map(([name, total], index) => {
-        const player = mockFinesData.find(f => f.playerName === name);
-        return { rank: index + 1, name, total, avatar: player?.avatar };
-      });
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
-    // Fun badges
-    const serialOffender = topPlayers[0]?.name || "";
-    const disciplinedPlayer = leaderboard[leaderboard.length - 1]?.name || "";
+export default function ReportsPanel({ userRole = "viewer" }: ReportsPanelProps) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
+  const [selectedTimeframe, setSelectedTimeframe] = useState("all");
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  const [playerBreakdown, setPlayerBreakdown] = useState<PlayerBreakdown[]>([]);
+  const [reasonBreakdown, setReasonBreakdown] = useState<ReasonBreakdown[]>([]);
 
-    return {
-      totalAmount,
-      totalCount,
-      topPlayers,
-      topReasons,
-      leaderboard,
-      serialOffender,
-      disciplinedPlayer
-    };
-  }, []);
+  useEffect(() => {
+    fetchReportData();
+  }, [selectedTimeframe, dateRange]);
 
-  const handleExport = (type: "excel" | "pdf", section: string) => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      toast.success(`${section} exported as ${type.toUpperCase()}`);
-    }, 1000);
+  const fetchReportData = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (dateRange.from) params.append('start_date', format(dateRange.from, 'yyyy-MM-dd'));
+      if (dateRange.to) params.append('end_date', format(dateRange.to, 'yyyy-MM-dd'));
+      if (selectedTimeframe !== 'all') params.append('timeframe', selectedTimeframe);
+
+      // Fetch summary data
+      const summaryResponse = await fetch(`/api/reports/summary?${params.toString()}`, { headers });
+      if (summaryResponse.ok) {
+        const summary = await summaryResponse.json();
+        setSummaryData({
+          totalFines: summary.totalFines || 0,
+          totalAmount: summary.totalAmount || 0,
+          uniquePlayers: summary.uniquePlayers || 0,
+          averageFineAmount: summary.averageFineAmount || 0,
+          mostCommonReason: summary.mostCommonReason || 'N/A',
+          highestFinedPlayer: summary.highestFinedPlayer || 'N/A'
+        });
+      }
+
+      // Fetch player breakdown
+      const playerResponse = await fetch(`/api/reports/player-breakdown?${params.toString()}`, { headers });
+      if (playerResponse.ok) {
+        const players = await playerResponse.json();
+        setPlayerBreakdown(players);
+      }
+
+      // Fetch reason breakdown
+      const reasonResponse = await fetch(`/api/reports/reason-breakdown?${params.toString()}`, { headers });
+      if (reasonResponse.ok) {
+        const reasons = await reasonResponse.json();
+        setReasonBreakdown(reasons);
+      }
+
+    } catch (error) {
+      console.error('Error fetching report data:', error);
+      toast.error('Failed to load report data');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleChartClick = (player?: string, reason?: string) => {
-    setSelectedPlayer(player || null);
-    setSelectedReason(reason || null);
-    setActiveTab("breakdown");
+  const handleExportReport = async (type: 'summary' | 'detailed') => {
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const params = new URLSearchParams();
+      
+      if (dateRange.from) params.append('start_date', format(dateRange.from, 'yyyy-MM-dd'));
+      if (dateRange.to) params.append('end_date', format(dateRange.to, 'yyyy-MM-dd'));
+      if (selectedTimeframe !== 'all') params.append('timeframe', selectedTimeframe);
+      params.append('report_type', type);
+
+      const response = await fetch(`/api/fines/export?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `${type}-report-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        toast.success(`${type} report exported successfully!`);
+      } else {
+        toast.error("Failed to export report");
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error("Export failed. Please try again.");
+    }
   };
 
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => 
-      prev.includes(id) 
-        ? prev.filter(rowId => rowId !== id)
-        : [...prev, id]
+  const chartData = useMemo(() => {
+    return playerBreakdown.map(player => ({
+      name: player.playerName,
+      amount: player.totalAmount,
+      fines: player.totalFines
+    }));
+  }, [playerBreakdown]);
+
+  const pieData = useMemo(() => {
+    return reasonBreakdown.map(reason => ({
+      name: reason.reasonName,
+      value: reason.count,
+      amount: reason.totalAmount
+    }));
+  }, [reasonBreakdown]);
+
+  if (isLoading) {
+    return (
+      <div className="w-full max-w-7xl mx-auto p-6 flex items-center justify-center min-h-96">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-muted-foreground">Loading reports...</p>
+        </div>
+      </div>
     );
-  };
+  }
 
   return (
-    <div className={`space-y-6 ${className}`}>
-      {/* Time Period Selector */}
-      <Card className="bg-card">
-        <CardHeader className="pb-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Section className="h-5 w-5" />
-                Reports & Analytics
-              </CardTitle>
-              <CardDescription>
-                Comprehensive insights into team fines and performance
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">Time Period:</span>
-              <Select value={timePeriod} onValueChange={(value) => setTimePeriod(value as TimePeriod)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="quarterly">Quarterly</SelectItem>
-                  <SelectItem value="half-yearly">Half-Yearly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
-                  <SelectItem value="custom">Custom</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+    <div className="w-full max-w-7xl mx-auto p-6 space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-display font-bold">Reports & Analytics</h1>
+          <p className="text-muted-foreground">
+            Comprehensive insights into team fines and player behavior
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={selectedTimeframe} onValueChange={setSelectedTimeframe}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="quarter">This Quarter</SelectItem>
+              <SelectItem value="year">This Year</SelectItem>
+            </SelectContent>
+          </Select>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4" />
+                Custom Range
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                initialFocus
+                mode="range"
+                defaultMonth={dateRange?.from}
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="outline"
+            onClick={() => handleExportReport('summary')}
+            className="flex items-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+        </div>
+      </div>
 
-      {/* Main Tabs */}
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="space-y-6">
+      {/* Summary Cards */}
+      {summaryData && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Total Fines</p>
+                  <p className="text-2xl font-bold">{summaryData.totalFines}</p>
+                </div>
+                <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <AlertCircle className="h-6 w-6 text-primary" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Total Amount</p>
+                  <p className="text-2xl font-bold">${summaryData.totalAmount.toFixed(2)}</p>
+                </div>
+                <div className="h-12 w-12 bg-success/10 rounded-lg flex items-center justify-center">
+                  <DollarSign className="h-6 w-6 text-success" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Players Fined</p>
+                  <p className="text-2xl font-bold">{summaryData.uniquePlayers}</p>
+                </div>
+                <div className="h-12 w-12 bg-blue-500/10 rounded-lg flex items-center justify-center">
+                  <Users className="h-6 w-6 text-blue-500" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Average Fine</p>
+                  <p className="text-2xl font-bold">${summaryData.averageFineAmount.toFixed(2)}</p>
+                </div>
+                <div className="h-12 w-12 bg-amber-500/10 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="h-6 w-6 text-amber-500" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Key Insights */}
+      {summaryData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Key Insights
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Most Common Violation</Label>
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                  <span className="font-medium">{summaryData.mostCommonReason}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Highest Fined Player</Label>
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-destructive" />
+                  <span className="font-medium">{summaryData.highestFinedPlayer}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Tabs defaultValue="player-breakdown" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="summary" className="flex items-center gap-2">
-            <PanelTop className="h-4 w-4" />
-            Summary
+          <TabsTrigger value="player-breakdown" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Player Breakdown
           </TabsTrigger>
-          <TabsTrigger value="visualization" className="flex items-center gap-2">
-            <ChartNoAxesCombined className="h-4 w-4" />
-            Visualization
+          <TabsTrigger value="reason-breakdown" className="flex items-center gap-2">
+            <PieChartIcon className="h-4 w-4" />
+            Reason Breakdown  
           </TabsTrigger>
-          <TabsTrigger value="breakdown" className="flex items-center gap-2">
-            <TableOfContents className="h-4 w-4" />
-            Breakdown
+          <TabsTrigger value="trends" className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Trends
           </TabsTrigger>
         </TabsList>
 
-        {/* Summary Tab */}
-        <TabsContent value="summary" className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Total Collected</CardDescription>
-                <CardTitle className="text-2xl">${stats.totalAmount}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">{stats.totalCount} fines issued</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Average Fine</CardDescription>
-                <CardTitle className="text-2xl">${Math.round(stats.totalAmount / stats.totalCount)}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">Per incident</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Most Common</CardDescription>
-                <CardTitle className="text-lg">{stats.topReasons[0]?.[0]}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">{stats.topReasons[0]?.[1]} incidents</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Top Offender</CardDescription>
-                <CardTitle className="text-lg">{stats.topPlayers[0]?.name}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">${stats.topPlayers[0]?.total} total</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Top Players & Reasons */}
+        <TabsContent value="player-breakdown" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>Top 3 Fined Players</CardTitle>
+                <CardTitle>Fine Amount by Player</CardTitle>
+                <CardDescription>Total fine amounts per player</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {stats.topPlayers.map((player, index) => (
-                  <div key={player.name} className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium">
-                      {index + 1}
-                    </div>
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={player.avatar} alt={player.name} />
-                      <AvatarFallback>{player.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-medium">{player.name}</p>
-                      <p className="text-sm text-muted-foreground">${player.total} total</p>
-                    </div>
-                  </div>
-                ))}
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="name" 
+                      angle={-45}
+                      textAnchor="end"
+                      height={100}
+                      fontSize={12}
+                    />
+                    <YAxis />
+                    <Tooltip 
+                      formatter={(value, name) => [
+                        `$${Number(value).toFixed(2)}`, 
+                        name === 'amount' ? 'Total Amount' : 'Total Fines'
+                      ]}
+                    />
+                    <Bar dataKey="amount" fill="#8884d8" />
+                  </BarChart>
+                </ResponsiveContainer>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Top 3 Fine Reasons</CardTitle>
+                <CardTitle>Player Rankings</CardTitle>
+                <CardDescription>Top players by total fine amount</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {stats.topReasons.map(([reason, count], index) => (
-                  <div key={reason} className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium">
-                      {index + 1}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium">{reason}</p>
-                      <p className="text-sm text-muted-foreground">{count} incidents</p>
-                    </div>
-                    <Badge variant="secondary">{count}</Badge>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Fun Badges */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Team Awards</CardTitle>
-              <CardDescription>Fun recognitions based on fine patterns</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-4">
-                <Badge variant="destructive" className="text-base px-4 py-2">
-                  🚨 Serial Offender: {stats.serialOffender}
-                </Badge>
-                <Badge variant="secondary" className="text-base px-4 py-2">
-                  😇 Most Disciplined: {stats.disciplinedPlayer}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Leaderboard */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Fines Leaderboard</CardTitle>
-                <CardDescription>All players ranked by total fine amounts</CardDescription>
-              </div>
-              <Button 
-                variant="outline" 
-                onClick={() => handleExport("excel", "Summary")}
-                disabled={loading}
-              >
-                Export Summary
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-16">Rank</TableHead>
-                    <TableHead>Player</TableHead>
-                    <TableHead className="text-right">Total Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {stats.leaderboard.map((player) => (
-                    <TableRow key={player.name}>
-                      <TableCell className="font-medium">#{player.rank}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={player.avatar} alt={player.name} />
-                            <AvatarFallback>{player.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                          </Avatar>
-                          {player.name}
+              <CardContent>
+                <div className="space-y-4">
+                  {playerBreakdown.slice(0, 10).map((player, index) => (
+                    <div key={player.playerName} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                          <span className="text-xs font-bold">#{index + 1}</span>
                         </div>
-                      </TableCell>
-                      <TableCell className="text-right font-medium">${player.total}</TableCell>
-                    </TableRow>
+                        <div>
+                          <p className="font-medium">{player.playerName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Jersey #{player.jerseyNumber} • {player.totalFines} fines
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant="destructive" className="font-mono">
+                          ${player.totalAmount.toFixed(2)}
+                        </Badge>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Avg: ${player.averageAmount.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Visualization Tab */}
-        <TabsContent value="visualization" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => handleChartClick()}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ChartBar className="h-5 w-5" />
-                  Fines Per Player
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg">
-                  <div className="text-center">
-                    <ChartColumnBig className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Interactive Bar Chart</p>
-                    <p className="text-xs text-muted-foreground">Click to filter breakdown</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => handleChartClick()}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileChartPie className="h-5 w-5" />
-                  Reason Breakdown
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg">
-                  <div className="text-center">
-                    <FileChartPie className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Interactive Pie Chart</p>
-                    <p className="text-xs text-muted-foreground">Click to filter breakdown</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2 cursor-pointer hover:shadow-md transition-shadow" onClick={() => handleChartClick()}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileChartLine className="h-5 w-5" />
-                  Trend Over Time
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64 flex items-center justify-center bg-muted rounded-lg">
-                  <div className="text-center">
-                    <FileChartLine className="h-12 w-12 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Interactive Line Chart</p>
-                    <p className="text-xs text-muted-foreground">Shows fine trends over selected time period</p>
-                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Chart Filters</CardTitle>
-              <CardDescription>Customize your visualization view</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Player Filter</label>
-                  <Select>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="All players" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All players</SelectItem>
-                      {Array.from(new Set(mockFinesData.map(f => f.playerName))).map(name => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Reason Filter</label>
-                  <Select>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="All reasons" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All reasons</SelectItem>
-                      {Array.from(new Set(mockFinesData.map(f => f.reason))).map(reason => (
-                        <SelectItem key={reason} value={reason}>{reason}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button variant="outline" onClick={() => handleExport("pdf", "Charts")}>
-                  Export Charts
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
-        {/* Breakdown Tab */}
-        <TabsContent value="breakdown" className="space-y-6">
+        <TabsContent value="reason-breakdown" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Fine Distribution by Reason</CardTitle>
+                <CardDescription>Percentage breakdown of fine reasons</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      cx="50%"
+                      cy="50%" 
+                      labelLine={false}
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {pieData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => [`${value} fines`]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Reason Analysis</CardTitle>
+                <CardDescription>Detailed breakdown by fine reason</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {reasonBreakdown.map((reason, index) => (
+                    <div key={reason.reasonName} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                          />
+                          <span className="font-medium">{reason.reasonName}</span>
+                        </div>
+                        <Badge variant="secondary">{reason.count} fines</Badge>
+                      </div>
+                      <div className="pl-5 space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Total Amount:</span>
+                          <span className="font-mono">${reason.totalAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Average:</span>
+                          <span className="font-mono">${reason.averageAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-2">
+                          <div 
+                            className="bg-primary h-2 rounded-full" 
+                            style={{ width: `${reason.percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="trends" className="space-y-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Detailed Breakdown</CardTitle>
-                <CardDescription>
-                  Drill down into fine details
-                  {selectedPlayer && <Badge className="ml-2">Player: {selectedPlayer}</Badge>}
-                  {selectedReason && <Badge className="ml-2">Reason: {selectedReason}</Badge>}
-                </CardDescription>
-              </div>
-              <div className="flex gap-2">
-                {(selectedPlayer || selectedReason) && (
-                  <Button 
-                    variant="outline" 
-                    onClick={() => { setSelectedPlayer(null); setSelectedReason(null); }}
-                  >
-                    Clear Filters
-                  </Button>
-                )}
-                <Button 
-                  variant="outline" 
-                  onClick={() => handleExport("excel", "Breakdown")}
-                  disabled={loading}
-                >
-                  Export Breakdown
-                </Button>
-              </div>
+            <CardHeader>
+              <CardTitle>Fine Trends Over Time</CardTitle>
+              <CardDescription>Track fine patterns and frequency over time</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {/* Group by Player */}
-                <Collapsible>
-                  <CollapsibleTrigger 
-                    className="flex items-center justify-between w-full p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
-                    onClick={() => toggleRow("players")}
-                  >
-                    <span className="font-medium">Group by Player</span>
-                    <ChartBar className="h-4 w-4" />
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2">
-                    <div className="border rounded-lg">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Player</TableHead>
-                            <TableHead>Fine Count</TableHead>
-                            <TableHead className="text-right">Total Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {stats.leaderboard.map((player) => (
-                            <TableRow key={player.name}>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-8 w-8">
-                                    <AvatarImage src={player.avatar} alt={player.name} />
-                                    <AvatarFallback>{player.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                                  </Avatar>
-                                  {player.name}
-                                </div>
-                              </TableCell>
-                              <TableCell>{mockFinesData.filter(f => f.playerName === player.name).length}</TableCell>
-                              <TableCell className="text-right font-medium">${player.total}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Separator />
-
-                {/* Group by Reason */}
-                <Collapsible>
-                  <CollapsibleTrigger 
-                    className="flex items-center justify-between w-full p-4 bg-muted rounded-lg hover:bg-muted/80 transition-colors"
-                    onClick={() => toggleRow("reasons")}
-                  >
-                    <span className="font-medium">Group by Reason</span>
-                    <FileChartColumn className="h-4 w-4" />
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2">
-                    <div className="border rounded-lg">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Reason</TableHead>
-                            <TableHead>Incident Count</TableHead>
-                            <TableHead className="text-right">Total Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {stats.topReasons.map(([reason, count]) => {
-                            const reasonTotal = mockFinesData
-                              .filter(f => f.reason === reason)
-                              .reduce((sum, f) => sum + f.amount, 0);
-                            return (
-                              <TableRow key={reason}>
-                                <TableCell className="font-medium">{reason}</TableCell>
-                                <TableCell>{count}</TableCell>
-                                <TableCell className="text-right font-medium">${reasonTotal}</TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Separator />
-
-                {/* Individual Fines */}
-                <div className="space-y-2">
-                  <h4 className="font-medium">All Fine Records</h4>
-                  <div className="border rounded-lg">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Player</TableHead>
-                          <TableHead>Reason</TableHead>
-                          <TableHead className="text-right">Amount</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {mockFinesData
-                          .filter(fine => !selectedPlayer || fine.playerName === selectedPlayer)
-                          .filter(fine => !selectedReason || fine.reason === selectedReason)
-                          .map((fine) => (
-                          <TableRow key={fine.id}>
-                            <TableCell>{new Date(fine.date).toLocaleDateString()}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Avatar className="h-6 w-6">
-                                  <AvatarImage src={fine.avatar} alt={fine.playerName} />
-                                  <AvatarFallback>{fine.playerName.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                                </Avatar>
-                                {fine.playerName}
-                              </div>
-                            </TableCell>
-                            <TableCell>{fine.reason}</TableCell>
-                            <TableCell className="text-right font-medium">${fine.amount}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                <div className="text-center">
+                  <TrendingUp className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Trend analysis will be available with more data</p>
+                  <p className="text-sm">Continue recording fines to see patterns over time</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Export Options */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Export Reports</CardTitle>
+          <CardDescription>Download detailed reports for external analysis</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            <Button 
+              variant="outline" 
+              onClick={() => handleExportReport('summary')}
+              className="flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Summary Report
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => handleExportReport('detailed')}
+              className="flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Detailed Report
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

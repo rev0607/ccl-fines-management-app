@@ -60,7 +60,11 @@ type SignupForm = z.infer<typeof signupSchema>;
 type ForgotForm = z.infer<typeof forgotSchema>;
 type ResetForm = z.infer<typeof resetSchema>;
 
-export default function AuthPages() {
+interface AuthPagesProps {
+  onLoginSuccess: (user: any) => void;
+}
+
+export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
   const [currentView, setCurrentView] = useState<AuthView>("login");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -142,14 +146,37 @@ export default function AuthPages() {
   const onLogin = async (data: LoginForm) => {
     setIsLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: data.email,
+          password: data.password,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.code === 'INVALID_CREDENTIALS') {
+          toast.error("Invalid email or password. Please make sure you have already registered an account and try again.");
+        } else {
+          toast.error(result.error || "Login failed. Please try again.");
+        }
+        return;
+      }
+
+      // Store user session
+      localStorage.setItem('ccl_user', JSON.stringify(result.user));
+      localStorage.setItem('bearer_token', `user_${result.user.id}_${Date.now()}`);
       
-      // Mock authentication - in real app, this would make API call
       toast.success("Welcome back!");
-      // Redirect would happen here in real app
+      onLoginSuccess(result.user);
     } catch (error) {
-      toast.error("Invalid credentials. Please try again.");
+      console.error('Login error:', error);
+      toast.error("Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -158,19 +185,38 @@ export default function AuthPages() {
   const onSignup = async (data: SignupForm) => {
     setIsLoading(true);
     try {
-      // Simulate API call with email uniqueness check
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Mock email exists check
-      if (data.email === "existing@example.com") {
-        signupForm.setError("email", { message: "This email is already registered" });
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: data.name,
+          email: data.email,
+          password: data.password,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.code === 'EMAIL_ALREADY_EXISTS') {
+          signupForm.setError("email", { message: "This email is already registered" });
+        } else if (result.code === 'INVALID_NAME') {
+          signupForm.setError("name", { message: result.error });
+        } else if (result.code === 'INVALID_PASSWORD') {
+          signupForm.setError("password", { message: result.error });
+        } else {
+          toast.error(result.error || "Registration failed. Please try again.");
+        }
         return;
       }
 
-      toast.success("Account created successfully! Please sign in.");
+      toast.success("Account created successfully! You can now sign in.");
       setCurrentView("login");
       loginForm.setValue("email", data.email);
     } catch (error) {
+      console.error('Signup error:', error);
       toast.error("Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
@@ -180,9 +226,10 @@ export default function AuthPages() {
   const onForgot = async (data: ForgotForm) => {
     setIsLoading(true);
     try {
-      // Simulate API call
+      // Mock forgot password - in real app would call forgot password API
       await new Promise(resolve => setTimeout(resolve, 1000));
       setForgotSuccess(true);
+      toast.success("If this email exists, a reset link has been sent.");
     } catch (error) {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -193,7 +240,7 @@ export default function AuthPages() {
   const onReset = async (data: ResetForm) => {
     setIsLoading(true);
     try {
-      // Simulate API call
+      // Mock reset password - in real app would call reset password API
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       toast.success("Password reset successfully! Please sign in with your new password.");
@@ -323,6 +370,7 @@ export default function AuthPages() {
                           <Input 
                             type={showPassword ? "text" : "password"}
                             placeholder="Enter your password"
+                            autoComplete="off"
                             {...field} 
                           />
                           <Button
@@ -442,6 +490,7 @@ export default function AuthPages() {
                           <Input 
                             type={showPassword ? "text" : "password"}
                             placeholder="Create a strong password"
+                            autoComplete="off"
                             {...field} 
                           />
                           <Button
@@ -476,6 +525,7 @@ export default function AuthPages() {
                           <Input 
                             type={showConfirmPassword ? "text" : "password"}
                             placeholder="Confirm your password"
+                            autoComplete="off"
                             {...field} 
                           />
                           <Button
@@ -581,6 +631,7 @@ export default function AuthPages() {
                           <Input 
                             type={showPassword ? "text" : "password"}
                             placeholder="Create a new password"
+                            autoComplete="off"
                             {...field} 
                           />
                           <Button
@@ -615,6 +666,7 @@ export default function AuthPages() {
                           <Input 
                             type={showConfirmPassword ? "text" : "password"}
                             placeholder="Confirm your new password"
+                            autoComplete="off"
                             {...field} 
                           />
                           <Button

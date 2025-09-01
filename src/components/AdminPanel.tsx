@@ -25,39 +25,42 @@ import {
   LayoutDashboard,
   ChevronRight,
   Undo,
-  PanelRightOpen
+  PanelRightOpen,
+  Users
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Player {
-  id: string;
+  id: number;
   name: string;
   email: string;
-  jersey: string;
+  jerseyNumber: string;
   position: string;
-  totalFines: number;
-  isDeleted: boolean;
+  totalFines?: number;
+  deletedAt?: string;
   createdAt: string;
 }
 
 interface FineReason {
-  id: string;
+  id: number;
   name: string;
   defaultAmount: number;
-  isDeleted: boolean;
   description?: string;
+  deletedAt?: string;
 }
 
 interface UserRole {
-  id: string;
+  id: number;
   email: string;
   name: string;
   role: 'viewer' | 'admin' | 'super_admin';
+  avatarUrl?: string;
+  createdAt: string;
 }
 
 interface AuditEntry {
-  id: string;
-  fineId?: string;
+  id: number;
+  fineId?: number;
   action: 'add' | 'edit' | 'delete' | 'restore';
   userEmail: string;
   timestamp: string;
@@ -71,50 +74,101 @@ interface SystemConfig {
   logoUrl?: string;
 }
 
-export default function AdminPanel() {
+interface AdminPanelProps {
+  userRole?: "viewer" | "admin" | "superadmin";
+}
+
+export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState("players");
-  const [userRole, setUserRole] = useState<'admin' | 'super_admin'>('admin'); // Mock current user role
   
-  // Mock data
-  const [players, setPlayers] = useState<Player[]>([
-    { id: '1', name: 'John Doe', email: 'john@example.com', jersey: '10', position: 'Forward', totalFines: 150, isDeleted: false, createdAt: '2024-01-15' },
-    { id: '2', name: 'Jane Smith', email: 'jane@example.com', jersey: '7', position: 'Midfielder', totalFines: 75, isDeleted: false, createdAt: '2024-01-20' },
-    { id: '3', name: 'Mike Wilson', email: 'mike@example.com', jersey: '3', position: 'Defender', totalFines: 200, isDeleted: true, createdAt: '2024-01-10' },
-  ]);
-
-  const [fineReasons, setFineReasons] = useState<FineReason[]>([
-    { id: '1', name: 'Late to Training', defaultAmount: 25, isDeleted: false, description: 'Arriving more than 15 minutes late' },
-    { id: '2', name: 'Missed Practice', defaultAmount: 50, isDeleted: false, description: 'Unexcused absence from team practice' },
-    { id: '3', name: 'Equipment Violation', defaultAmount: 15, isDeleted: false, description: 'Incorrect or missing equipment' },
-  ]);
-
-  const [users, setUsers] = useState<UserRole[]>([
-    { id: '1', email: 'admin@example.com', name: 'Admin User', role: 'admin' },
-    { id: '2', email: 'super@example.com', name: 'Super Admin', role: 'super_admin' },
-    { id: '3', email: 'viewer@example.com', name: 'Regular User', role: 'viewer' },
-  ]);
-
-  const [auditLog] = useState<AuditEntry[]>([
-    { id: '1', fineId: 'F001', action: 'add', userEmail: 'admin@example.com', timestamp: '2024-01-20T10:30:00Z', details: 'Added fine for late arrival' },
-    { id: '2', fineId: 'F002', action: 'edit', userEmail: 'super@example.com', timestamp: '2024-01-19T15:45:00Z', details: 'Updated fine amount from $25 to $30' },
-    { id: '3', action: 'delete', userEmail: 'admin@example.com', timestamp: '2024-01-18T09:15:00Z', details: 'Soft deleted player Mike Wilson' },
-  ]);
-
+  // State for data
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [fineReasons, setFineReasons] = useState<FineReason[]>([]);
+  const [users, setUsers] = useState<UserRole[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
   const [systemConfig, setSystemConfig] = useState<SystemConfig>({
     currency: '$',
     fineFrequency: 'match',
     appName: 'CCL Fines',
   });
 
+  // Loading states
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch all data on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const token = localStorage.getItem('bearer_token');
+        const headers = {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        };
+
+        // Fetch players
+        const playersResponse = await fetch('/api/players', { headers });
+        if (playersResponse.ok) {
+          const playersData = await playersResponse.json();
+          setPlayers(playersData);
+        }
+
+        // Fetch fine reasons
+        const reasonsResponse = await fetch('/api/fine-reasons', { headers });
+        if (reasonsResponse.ok) {
+          const reasonsData = await reasonsResponse.json();
+          setFineReasons(reasonsData);
+        }
+
+        // Fetch users (only for super admin)
+        if (userRole === 'superadmin') {
+          const usersResponse = await fetch('/api/users', { headers });
+          if (usersResponse.ok) {
+            const usersData = await usersResponse.json();
+            setUsers(usersData);
+          }
+
+          // Fetch audit log
+          const auditResponse = await fetch('/api/audit-logs', { headers });
+          if (auditResponse.ok) {
+            const auditData = await auditResponse.json();
+            setAuditLog(auditData);
+          }
+        }
+
+        // Fetch settings
+        const settingsResponse = await fetch('/api/settings', { headers });
+        if (settingsResponse.ok) {
+          const settingsData = await settingsResponse.json();
+          if (settingsData.length > 0) {
+            const settings = settingsData[0];
+            setSystemConfig({
+              currency: settings.currency || '$',
+              fineFrequency: settings.fineFrequency || 'match',
+              appName: settings.appName || 'CCL Fines',
+              logoUrl: settings.logoUrl,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        toast.error('Failed to load admin data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [userRole]);
+
   // Filter functions
-  const activeUsers = users.filter(user => user.role !== 'viewer' || userRole === 'super_admin');
-  const activePlayers = players.filter(player => !player.isDeleted);
-  const deletedPlayers = players.filter(player => player.isDeleted);
-  const activeReasons = fineReasons.filter(reason => !reason.isDeleted);
+  const activePlayers = players.filter(player => !player.deletedAt);
+  const deletedPlayers = players.filter(player => player.deletedAt);
+  const activeReasons = fineReasons.filter(reason => !reason.deletedAt);
 
   const canAccessTab = (tab: string) => {
-    if (tab === 'roles' || tab === 'audit') {
-      return userRole === 'super_admin';
+    if (tab === 'manage-users' || tab === 'audit') {
+      return userRole === 'superadmin';
     }
     return true;
   };
@@ -122,11 +176,22 @@ export default function AdminPanel() {
   const tabs = [
     { id: 'players', label: 'Players', icon: User },
     { id: 'reasons', label: 'Fine Reasons', icon: LayoutDashboard },
-    { id: 'roles', label: 'Roles', icon: UserCog, superAdminOnly: true },
+    { id: 'manage-users', label: 'Manage Users', icon: Users, superAdminOnly: true },
     { id: 'customization', label: 'Customization', icon: SlidersVertical },
     { id: 'audit', label: 'Audit Log', icon: Logs, superAdminOnly: true },
     { id: 'info', label: 'Info', icon: PanelRightOpen },
   ].filter(tab => canAccessTab(tab.id));
+
+  if (isLoading) {
+    return (
+      <div className="w-full max-w-7xl mx-auto p-6 flex items-center justify-center min-h-96">
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-muted-foreground">Loading admin panel...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-7xl mx-auto p-6 space-y-6">
@@ -136,7 +201,7 @@ export default function AdminPanel() {
           <p className="text-muted-foreground">Manage players, settings, and system configuration</p>
         </div>
         <Badge variant="secondary" className="text-sm">
-          {userRole === 'super_admin' ? 'Super Admin' : 'Admin'}
+          {userRole === 'superadmin' ? 'Super Admin' : 'Admin'}
         </Badge>
       </div>
 
@@ -173,12 +238,13 @@ export default function AdminPanel() {
             setFineReasons={setFineReasons}
             activeReasons={activeReasons}
             systemConfig={systemConfig}
+            userRole={userRole}
           />
         </TabsContent>
 
-        {canAccessTab('roles') && (
-          <TabsContent value="roles">
-            <RolesTab 
+        {canAccessTab('manage-users') && (
+          <TabsContent value="manage-users">
+            <ManageUsersTab 
               users={users}
               setUsers={setUsers}
               currentUserRole={userRole}
@@ -229,29 +295,29 @@ function PlayersTab({
   const [playerForm, setPlayerForm] = useState({
     name: '',
     email: '',
-    jersey: '',
+    jerseyNumber: '',
     position: ''
   });
 
   const handleAddPlayer = () => {
-    if (!playerForm.name || !playerForm.email || !playerForm.jersey) {
+    if (!playerForm.name || !playerForm.email || !playerForm.jerseyNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
 
     const newPlayer: Player = {
-      id: Date.now().toString(),
+      id: Date.now(),
       name: playerForm.name,
       email: playerForm.email,
-      jersey: playerForm.jersey,
+      jerseyNumber: playerForm.jerseyNumber,
       position: playerForm.position,
       totalFines: 0,
-      isDeleted: false,
+      deletedAt: undefined,
       createdAt: new Date().toISOString().split('T')[0]
     };
 
     setPlayers([...players, newPlayer]);
-    setPlayerForm({ name: '', email: '', jersey: '', position: '' });
+    setPlayerForm({ name: '', email: '', jerseyNumber: '', position: '' });
     setShowPlayerForm(false);
     toast.success("Player added successfully");
   };
@@ -267,17 +333,17 @@ function PlayersTab({
     toast.success("Player updated successfully");
   };
 
-  const handleSoftDeletePlayer = (playerId: string) => {
+  const handleSoftDeletePlayer = (playerId: number) => {
     const updatedPlayers = players.map(p => 
-      p.id === playerId ? { ...p, isDeleted: true } : p
+      p.id === playerId ? { ...p, deletedAt: new Date().toISOString() } : p
     );
     setPlayers(updatedPlayers);
     toast.success("Player deleted successfully");
   };
 
-  const handleRestorePlayer = (playerId: string) => {
+  const handleRestorePlayer = (playerId: number) => {
     const updatedPlayers = players.map(p => 
-      p.id === playerId ? { ...p, isDeleted: false } : p
+      p.id === playerId ? { ...p, deletedAt: undefined } : p
     );
     setPlayers(updatedPlayers);
     toast.success("Player restored successfully");
@@ -372,8 +438,8 @@ Jane Smith,jane@example.com,7,Midfielder`}
                   <Label htmlFor="jersey">Jersey Number *</Label>
                   <Input
                     id="jersey"
-                    value={playerForm.jersey}
-                    onChange={(e) => setPlayerForm(prev => ({ ...prev, jersey: e.target.value }))}
+                    value={playerForm.jerseyNumber}
+                    onChange={(e) => setPlayerForm(prev => ({ ...prev, jerseyNumber: e.target.value }))}
                     placeholder="Enter jersey number"
                   />
                 </div>
@@ -435,11 +501,11 @@ Jane Smith,jane@example.com,7,Midfielder`}
                         <p className="text-sm text-muted-foreground">{player.email}</p>
                       </div>
                     </TableCell>
-                    <TableCell>#{player.jersey}</TableCell>
+                    <TableCell>#{player.jerseyNumber}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{player.position}</Badge>
                     </TableCell>
-                    <TableCell>${player.totalFines}</TableCell>
+                    <TableCell>${player.totalFines || 0}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Sheet>
@@ -463,7 +529,7 @@ Jane Smith,jane@example.com,7,Midfielder`}
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
                                   <Label className="text-sm font-medium">Jersey</Label>
-                                  <p className="text-sm text-muted-foreground">#{player.jersey}</p>
+                                  <p className="text-sm text-muted-foreground">#{player.jerseyNumber}</p>
                                 </div>
                                 <div>
                                   <Label className="text-sm font-medium">Position</Label>
@@ -471,7 +537,7 @@ Jane Smith,jane@example.com,7,Midfielder`}
                                 </div>
                                 <div>
                                   <Label className="text-sm font-medium">Total Fines</Label>
-                                  <p className="text-sm font-medium text-destructive">${player.totalFines}</p>
+                                  <p className="text-sm font-medium text-destructive">${player.totalFines || 0}</p>
                                 </div>
                                 <div>
                                   <Label className="text-sm font-medium">Joined</Label>
@@ -537,9 +603,9 @@ Jane Smith,jane@example.com,7,Midfielder`}
                                 <div>
                                   <Label>Jersey</Label>
                                   <Input
-                                    value={editingPlayer.jersey}
+                                    value={editingPlayer.jerseyNumber}
                                     onChange={(e) => setEditingPlayer(prev => 
-                                      prev ? { ...prev, jersey: e.target.value } : null
+                                      prev ? { ...prev, jerseyNumber: e.target.value } : null
                                     )}
                                   />
                                 </div>
@@ -633,7 +699,7 @@ Jane Smith,jane@example.com,7,Midfielder`}
                           <p className="text-sm text-muted-foreground">{player.email}</p>
                         </div>
                       </TableCell>
-                      <TableCell>#{player.jersey}</TableCell>
+                      <TableCell>#{player.jerseyNumber}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{player.position}</Badge>
                       </TableCell>
@@ -670,6 +736,7 @@ function ReasonsTab({
   setFineReasons: (reasons: FineReason[]) => void;
   activeReasons: FineReason[];
   systemConfig: SystemConfig;
+  userRole?: 'admin' | 'super_admin';
 }) {
   const [showReasonForm, setShowReasonForm] = useState(false);
   const [editingReason, setEditingReason] = useState<FineReason | null>(null);
@@ -686,11 +753,11 @@ function ReasonsTab({
     }
 
     const newReason: FineReason = {
-      id: Date.now().toString(),
+      id: Date.now(),
       name: reasonForm.name,
       defaultAmount: reasonForm.defaultAmount,
       description: reasonForm.description,
-      isDeleted: false
+      deletedAt: undefined
     };
 
     setFineReasons([...fineReasons, newReason]);
@@ -710,9 +777,9 @@ function ReasonsTab({
     toast.success("Fine reason updated successfully");
   };
 
-  const handleDeleteReason = (reasonId: string) => {
+  const handleDeleteReason = (reasonId: number) => {
     const updatedReasons = fineReasons.map(r => 
-      r.id === reasonId ? { ...r, isDeleted: true } : r
+      r.id === reasonId ? { ...r, deletedAt: new Date().toISOString() } : r
     );
     setFineReasons(updatedReasons);
     toast.success("Fine reason deleted successfully");
@@ -898,18 +965,19 @@ function ReasonsTab({
   );
 }
 
-function RolesTab({ 
+function ManageUsersTab({ 
   users, 
   setUsers, 
   currentUserRole 
 }: {
   users: UserRole[];
   setUsers: (users: UserRole[]) => void;
-  currentUserRole: 'admin' | 'super_admin';
+  currentUserRole: 'admin' | 'superadmin';
 }) {
   const [showPromoteConfirm, setShowPromoteConfirm] = useState<UserRole | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const handleRoleChange = (userId: string, newRole: 'viewer' | 'admin' | 'super_admin') => {
+  const handleRoleChange = async (userId: number, newRole: 'viewer' | 'admin' | 'super_admin') => {
     if (newRole === 'super_admin') {
       const user = users.find(u => u.id === userId);
       if (user) {
@@ -918,55 +986,111 @@ function RolesTab({
       return;
     }
 
-    const updatedUsers = users.map(u => 
-      u.id === userId ? { ...u, role: newRole } : u
-    );
-    setUsers(updatedUsers);
-    toast.success(`User role updated to ${newRole}`);
+    setIsUpdating(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/users/${userId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: newRole }),
+      });
+
+      if (response.ok) {
+        const updatedUsers = users.map(u => 
+          u.id === userId ? { ...u, role: newRole } : u
+        );
+        setUsers(updatedUsers);
+        toast.success(`User role updated to ${newRole}`);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to update user role');
+      }
+    } catch (error) {
+      console.error('Role change error:', error);
+      toast.error('Failed to update user role');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const confirmSuperAdminPromotion = () => {
+  const confirmSuperAdminPromotion = async () => {
     if (!showPromoteConfirm) return;
 
-    // Demote current super admin
-    const updatedUsers = users.map(u => {
-      if (u.role === 'super_admin' && u.id !== showPromoteConfirm.id) {
-        return { ...u, role: 'admin' as const };
-      }
-      if (u.id === showPromoteConfirm.id) {
-        return { ...u, role: 'super_admin' as const };
-      }
-      return u;
-    });
+    setIsUpdating(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/users/${showPromoteConfirm.id}/role`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: 'super_admin' }),
+      });
 
-    setUsers(updatedUsers);
-    setShowPromoteConfirm(null);
-    toast.success(`${showPromoteConfirm.name} is now the Super Admin`);
+      if (response.ok) {
+        // Update local state - demote current super admin and promote new one
+        const updatedUsers = users.map(u => {
+          if (u.role === 'super_admin' && u.id !== showPromoteConfirm.id) {
+            return { ...u, role: 'admin' as const };
+          }
+          if (u.id === showPromoteConfirm.id) {
+            return { ...u, role: 'super_admin' as const };
+          }
+          return u;
+        });
+
+        setUsers(updatedUsers);
+        setShowPromoteConfirm(null);
+        toast.success(`${showPromoteConfirm.name} is now the Super Admin`);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to update super admin');
+      }
+    } catch (error) {
+      console.error('Super admin promotion error:', error);
+      toast.error('Failed to update super admin');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-display font-bold">Roles Management</h2>
+        <h2 className="text-2xl font-display font-bold">Manage Users</h2>
         <p className="text-muted-foreground">Manage user roles and permissions (Super Admin only)</p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <UserCog className="h-5 w-5" />
-            User Roles
+            <Users className="h-5 w-5" />
+            User Roles & Permissions
           </CardTitle>
           <CardDescription>
-            Control user access levels and permissions
+            Control user access levels and permissions. Only Super Admin can manage user roles.
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 p-4 bg-muted rounded-lg">
+            <h4 className="font-medium mb-2">Role Permissions:</h4>
+            <ul className="text-sm space-y-1 text-muted-foreground">
+              <li>• <strong>Viewer:</strong> Can view & export fines and reports only</li>
+              <li>• <strong>Admin:</strong> Can add fines, manage players & fine reasons. Cannot delete fines</li>
+              <li>• <strong>Super Admin:</strong> Full control - manage everything including user roles</li>
+            </ul>
+          </div>
+
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
                 <TableHead>Current Role</TableHead>
+                <TableHead>Joined</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -974,9 +1098,14 @@ function RolesTab({
               {users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
-                    <div>
-                      <p className="font-medium">{user.name}</p>
-                      <p className="text-sm text-muted-foreground">{user.email}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{user.name}</p>
+                        <p className="text-sm text-muted-foreground">{user.email}</p>
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -991,14 +1120,20 @@ function RolesTab({
                     </Badge>
                   </TableCell>
                   <TableCell>
+                    <span className="text-sm text-muted-foreground">
+                      {new Date(user.createdAt).toLocaleDateString()}
+                    </span>
+                  </TableCell>
+                  <TableCell>
                     <div className="flex items-center gap-2">
-                      {user.role !== 'admin' && (
+                      {user.role === 'viewer' && (
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleRoleChange(user.id, 'admin')}
+                          disabled={isUpdating}
                         >
-                          {user.role === 'viewer' ? 'Promote to Admin' : 'Demote to Admin'}
+                          Promote to Admin
                         </Button>
                       )}
                       {user.role === 'admin' && (
@@ -1007,6 +1142,7 @@ function RolesTab({
                             variant="outline"
                             size="sm"
                             onClick={() => handleRoleChange(user.id, 'viewer')}
+                            disabled={isUpdating}
                           >
                             Demote to Viewer
                           </Button>
@@ -1014,19 +1150,16 @@ function RolesTab({
                             variant="outline"
                             size="sm"
                             onClick={() => handleRoleChange(user.id, 'super_admin')}
+                            disabled={isUpdating}
                           >
                             Make Super Admin
                           </Button>
                         </>
                       )}
-                      {user.role === 'viewer' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRoleChange(user.id, 'admin')}
-                        >
-                          Promote to Admin
-                        </Button>
+                      {user.role === 'super_admin' && (
+                        <Badge variant="outline" className="text-xs">
+                          Current Super Admin
+                        </Badge>
                       )}
                     </div>
                   </TableCell>
@@ -1034,6 +1167,13 @@ function RolesTab({
               ))}
             </TableBody>
           </Table>
+
+          {users.length === 0 && (
+            <div className="text-center py-8">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">No users found</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1049,12 +1189,13 @@ function RolesTab({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isUpdating}>Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={confirmSuperAdminPromotion}
+              disabled={isUpdating}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Confirm Assignment
+              {isUpdating ? 'Updating...' : 'Confirm Assignment'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
