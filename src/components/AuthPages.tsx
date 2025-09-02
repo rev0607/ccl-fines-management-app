@@ -189,8 +189,12 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
         return;
       }
 
-      toast.success("Account created! Please check your email to verify.");
-      router.push("/login?registered=true");
+      toast.success("Account created successfully! You can now sign in.");
+      // Switch to login view instead of redirecting to non-existent route
+      resetAllForms();
+      setCurrentView("login");
+      // Pre-fill the email in login form
+      loginForm.setValue("email", data.email);
     } catch (error) {
       console.error('Signup error:', error);
       toast.error("Something went wrong. Please try again.");

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { fines, players, fineReasons } from '@/db/schema';
+import { fines, players, fineReasons, users } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
+import { auth } from '@/lib/auth';
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -135,50 +136,32 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    // Extract bearer token from Authorization header
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Validate session and check permissions
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session?.user) {
       return NextResponse.json({ 
-        error: 'Authorization token required',
-        code: 'MISSING_TOKEN' 
+        error: 'Unauthorized',
+        code: 'UNAUTHORIZED' 
       }, { status: 401 });
     }
 
-    const token = authHeader.substring(7);
-    
-    // Parse user ID from token (format: user_${userId}_${timestamp})
-    const tokenParts = token.split('_');
-    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
-      return NextResponse.json({ 
-        error: 'Invalid token format',
-        code: 'INVALID_TOKEN' 
-      }, { status: 401 });
-    }
-
-    const userId = parseInt(tokenParts[1]);
-    if (isNaN(userId)) {
-      return NextResponse.json({ 
-        error: 'Invalid user ID in token',
-        code: 'INVALID_USER_ID' 
-      }, { status: 401 });
-    }
-
-    // Check user role - only super admin can delete fines
-    const { users } = await import('@/db/schema');
-    const userResult = await db.select()
+    // Get user from database to check role
+    const currentUser = await db.select()
       .from(users)
-      .where(eq(users.id, userId))
+      .where(eq(users.email, session.user.email))
       .limit(1);
 
-    if (userResult.length === 0) {
+    if (currentUser.length === 0) {
       return NextResponse.json({ 
         error: 'User not found',
         code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
 
-    const user = userResult[0];
-    if (user.role !== 'super_admin') {
+    const user = currentUser[0];
+    
+    // Only superadmin can delete fines
+    if (user.role !== 'superadmin') {
       return NextResponse.json({ 
         error: 'Only super admin can delete fines',
         code: 'INSUFFICIENT_PERMISSIONS' 
