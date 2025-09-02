@@ -12,6 +12,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { LogIn, User, EyeOff, View, MailCheck, LockKeyhole, RotateCcwKey } from "lucide-react";
+import { authClient } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 
 type AuthView = "login" | "signup" | "forgot" | "reset";
 
@@ -75,6 +77,8 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
     feedback: [],
     color: "text-muted-foreground"
   });
+  
+  const router = useRouter();
 
   const loginForm = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -146,34 +150,20 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
   const onLogin = async (data: LoginForm) => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: data.email,
-          password: data.password,
-        }),
+      const { data: session, error } = await authClient.signIn.email({
+        email: data.email,
+        password: data.password,
+        rememberMe: data.rememberMe,
+        callbackURL: "/"
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        if (result.code === 'INVALID_CREDENTIALS') {
-          toast.error("Invalid email or password. Please make sure you have already registered an account and try again.");
-        } else {
-          toast.error(result.error || "Login failed. Please try again.");
-        }
+      if (error?.code) {
+        toast.error("Invalid email or password. Please make sure you have already registered an account and try again.");
         return;
       }
 
-      // Store user session
-      localStorage.setItem('ccl_user', JSON.stringify(result.user));
-      localStorage.setItem('bearer_token', `user_${result.user.id}_${Date.now()}`);
-      
       toast.success("Welcome back!");
-      onLoginSuccess(result.user);
+      onLoginSuccess(session?.user);
     } catch (error) {
       console.error('Login error:', error);
       toast.error("Something went wrong. Please try again.");
@@ -185,36 +175,22 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
   const onSignup = async (data: SignupForm) => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: data.name,
-          email: data.email,
-          password: data.password,
-        }),
+      const { data: session, error } = await authClient.signUp.email({
+        email: data.email,
+        name: data.name,
+        password: data.password
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        if (result.code === 'EMAIL_ALREADY_EXISTS') {
-          signupForm.setError("email", { message: "This email is already registered" });
-        } else if (result.code === 'INVALID_NAME') {
-          signupForm.setError("name", { message: result.error });
-        } else if (result.code === 'INVALID_PASSWORD') {
-          signupForm.setError("password", { message: result.error });
-        } else {
-          toast.error(result.error || "Registration failed. Please try again.");
-        }
+      if (error?.code) {
+        const errorMap = {
+          USER_ALREADY_EXISTS: "Email already registered"
+        };
+        toast.error(errorMap[error.code as keyof typeof errorMap] || "Registration failed");
         return;
       }
 
-      toast.success("Account created successfully! You can now sign in.");
-      setCurrentView("login");
-      loginForm.setValue("email", data.email);
+      toast.success("Account created! Please check your email to verify.");
+      router.push("/login?registered=true");
     } catch (error) {
       console.error('Signup error:', error);
       toast.error("Something went wrong. Please try again.");

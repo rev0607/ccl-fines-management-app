@@ -7,105 +7,84 @@ import AuthPages from "@/components/AuthPages";
 import FinesPanel from "@/components/FinesPanel";
 import ReportsPanel from "@/components/ReportsPanel";
 import AdminPanel from "@/components/AdminPanel";
+import { authClient, useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 type TabType = "Fines" | "Reports" | "Admin";
 
 interface User {
-  id: number;
+  id: string;
   name: string;
   email: string;
-  avatarUrl?: string;
-  role: "viewer" | "admin" | "superadmin";
+  image?: string;
+  role?: "viewer" | "admin" | "superadmin";
 }
 
 export default function HomePage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("Fines");
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: session, isPending, refetch } = useSession();
+  const router = useRouter();
 
-  // Check authentication on mount
+  // Check authentication and update user state
   useEffect(() => {
-    const checkAuth = async () => {
-      setIsLoading(true);
-      
-      try {
-        // Check if user data exists in localStorage
-        const storedUser = localStorage.getItem('ccl_user');
-        const token = localStorage.getItem('bearer_token');
-        
-        if (storedUser && token) {
-          const userData = JSON.parse(storedUser);
-          
-          // Verify session with server
-          const response = await fetch('/api/auth/me', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-            },
-          });
-
-          if (response.ok) {
-            const result = await response.json();
-            setUser({
-              id: result.user.id,
-              name: result.user.name,
-              email: result.user.email,
-              avatarUrl: result.user.avatarUrl,
-              role: result.user.role === 'super_admin' ? 'superadmin' : result.user.role
-            });
-            setIsAuthenticated(true);
-          } else {
-            // Session invalid, clear storage
-            localStorage.removeItem('ccl_user');
-            localStorage.removeItem('bearer_token');
-          }
-        }
-      } catch (error) {
-        console.error('Auth check error:', error);
-        localStorage.removeItem('ccl_user');
-        localStorage.removeItem('bearer_token');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, []);
+    if (session?.user) {
+      // Map better-auth session to our user interface
+      setUser({
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        image: session.user.image,
+        role: session.user.role || "viewer" // Default to viewer if no role set
+      });
+    } else {
+      setUser(null);
+    }
+  }, [session]);
 
   const handleLoginSuccess = (userData: any) => {
-    const mappedUser: User = {
-      id: userData.id,
-      name: userData.name,
-      email: userData.email,
-      avatarUrl: userData.avatarUrl,
-      role: userData.role === 'super_admin' ? 'superadmin' : userData.role
-    };
-    
-    setUser(mappedUser);
-    setIsAuthenticated(true);
-    setActiveTab("Fines"); // Default to Fines tab
+    if (userData) {
+      setUser({
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        image: userData.image,
+        role: userData.role || "viewer"
+      });
+      setActiveTab("Fines"); // Default to Fines tab
+      refetch(); // Refresh session state
+    }
   };
 
   const handleSignOut = async () => {
     try {
-      const token = localStorage.getItem('bearer_token');
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
+      const token = localStorage.getItem("bearer_token");
+      const { error } = await authClient.signOut({
+        fetchOptions: {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
           },
-        });
+        },
+      });
+      
+      if (error?.code) {
+        toast.error(error.code);
+      } else {
+        localStorage.removeItem("bearer_token");
+        setUser(null);
+        setActiveTab("Fines");
+        refetch(); // Update session state
+        router.push("/");
+        toast.success("Signed out successfully");
       }
     } catch (error) {
       console.error('Logout error:', error);
-    } finally {
-      // Clear session data
-      localStorage.removeItem('ccl_user');
-      localStorage.removeItem('bearer_token');
-      setIsAuthenticated(false);
+      localStorage.removeItem("bearer_token");
       setUser(null);
       setActiveTab("Fines");
+      refetch();
+      router.push("/");
     }
   };
 
@@ -126,12 +105,12 @@ export default function HomePage() {
       case "superadmin":
         return ["Fines", "Reports", "Admin"];
       default:
-        return ["Fines"];
+        return ["Fines", "Reports"];
     }
   };
 
-  // Loading screen
-  if (isLoading) {
+  // Loading screen while checking authentication
+  if (isPending) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
@@ -143,7 +122,7 @@ export default function HomePage() {
   }
 
   // Show auth pages if not authenticated
-  if (!isAuthenticated) {
+  if (!session?.user) {
     return (
       <>
         <AuthPages onLoginSuccess={handleLoginSuccess} />
@@ -184,7 +163,12 @@ export default function HomePage() {
         {/* Tab Navigation */}
         <div className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-16 z-40">
           <div className="max-w-7xl mx-auto px-4 md:px-6">
-            <nav className="flex space-x-8" aria-label="Main navigation">
+            <nav 
+              className={`flex space-x-8 ${
+                availableTabs.length === 2 ? 'justify-center' : ''
+              }`} 
+              aria-label="Main navigation"
+            >
               {availableTabs.map((tab) => (
                 <button
                   key={tab}
