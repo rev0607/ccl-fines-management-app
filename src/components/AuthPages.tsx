@@ -162,8 +162,57 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
         return;
       }
 
-      toast.success("Welcome back!");
-      onLoginSuccess(session?.user);
+      if (session?.user) {
+        // Store the bearer token for API calls
+        const token = localStorage.getItem("better-auth.session_token") || session.token;
+        if (token) {
+          localStorage.setItem("bearer_token", token);
+        }
+
+        // Get user role from database to ensure proper role mapping
+        try {
+          const userResponse = await fetch('/api/users', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (userResponse.ok) {
+            const users = await userResponse.json();
+            const currentUser = users.find((u: any) => u.email === session.user.email);
+            
+            if (currentUser) {
+              // Map better-auth user to app user format
+              const mappedUser = {
+                id: currentUser.id, // Use database user ID (number)
+                name: session.user.name || currentUser.name,
+                email: session.user.email,
+                image: session.user.image,
+                role: currentUser.role || "viewer"
+              };
+              
+              toast.success("Welcome back!");
+              onLoginSuccess(mappedUser);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching user role:', error);
+        }
+
+        // Fallback if user lookup fails
+        const fallbackUser = {
+          id: parseInt(session.user.id) || Date.now(), // Convert string ID to number
+          name: session.user.name || "User",
+          email: session.user.email,
+          image: session.user.image,
+          role: "viewer" as const
+        };
+        
+        toast.success("Welcome back!");
+        onLoginSuccess(fallbackUser);
+      }
     } catch (error) {
       console.error('Login error:', error);
       toast.error("Something went wrong. Please try again.");
@@ -183,17 +232,16 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
 
       if (error?.code) {
         const errorMap = {
-          USER_ALREADY_EXISTS: "Email already registered"
+          USER_ALREADY_EXISTS: "Email already registered. Please try signing in instead."
         };
         toast.error(errorMap[error.code as keyof typeof errorMap] || "Registration failed");
         return;
       }
 
       toast.success("Account created successfully! You can now sign in.");
-      // Switch to login view instead of redirecting to non-existent route
+      // Switch to login view and pre-fill email
       resetAllForms();
       setCurrentView("login");
-      // Pre-fill the email in login form
       loginForm.setValue("email", data.email);
     } catch (error) {
       console.error('Signup error:', error);

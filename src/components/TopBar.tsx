@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { 
@@ -61,10 +61,82 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
     fineFrequency: 'match',
     appName: 'CCL Fines',
   });
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Initialize theme and settings on component mount
+  useEffect(() => {
+    // Initialize dark mode from localStorage
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && prefersDark);
+    
+    setIsDarkMode(shouldBeDark);
+    if (shouldBeDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+
+    // Load settings from localStorage with Indian rupee as default
+    const savedSettings = localStorage.getItem('systemConfig');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setSystemConfig({
+          currency: '₹',
+          fineFrequency: parsed.fineFrequency || 'match',
+          appName: parsed.appName || 'CCL Fines',
+          logoUrl: parsed.logoUrl,
+        });
+      } catch (error) {
+        console.error('Error loading settings:', error);
+      }
+    }
+
+    // Load settings from backend
+    loadSettingsFromBackend();
+  }, []);
+
+  const loadSettingsFromBackend = async () => {
+    try {
+      const token = localStorage.getItem("bearer_token");
+      const response = await fetch('/api/settings', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const settings = await response.json();
+        setSystemConfig(prev => ({
+          ...prev,
+          currency: '₹',
+          fineFrequency: settings.fineFrequency || 'match',
+          appName: settings.appName || 'CCL Fines',
+          logoUrl: settings.logoUrl,
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading settings from backend:', error);
+    }
+  };
 
   const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    document.documentElement.classList.toggle("dark");
+    const newTheme = !isDarkMode;
+    setIsDarkMode(newTheme);
+    
+    // Update localStorage
+    localStorage.setItem('theme', newTheme ? 'dark' : 'light');
+    
+    // Update document class
+    if (newTheme) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    
+    toast.success(`Switched to ${newTheme ? 'dark' : 'light'} mode`);
   };
 
   const handleProfileClick = () => {
@@ -75,10 +147,50 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
     setShowSettingsModal(true);
   };
 
-  const handleSaveSettings = () => {
-    // In a real app, this would save to the backend
-    toast.success("Settings saved successfully");
-    setShowSettingsModal(false);
+  const handleSaveSettings = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("bearer_token");
+      
+      // Ensure currency is always Indian rupee
+      const settingsToSave = {
+        ...systemConfig,
+        currency: '₹'
+      };
+
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(settingsToSave),
+      });
+
+      if (response.ok) {
+        // Save to localStorage
+        localStorage.setItem('systemConfig', JSON.stringify(settingsToSave));
+        
+        // Update state
+        setSystemConfig(settingsToSave);
+        
+        toast.success("Settings saved successfully! Changes will be reflected across all tabs.");
+        setShowSettingsModal(false);
+        
+        // Force page refresh to apply settings globally
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        const error = await response.json();
+        toast.error(error.message || "Failed to save settings");
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error("Failed to save settings");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getUserInitials = (name: string) => {
@@ -135,7 +247,7 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
                   <span className="text-primary-foreground font-bold text-sm">CF</span>
                 </div>
                 <div>
-                  <h1 className="font-display font-bold text-lg">CCL Fines</h1>
+                  <h1 className="font-display font-bold text-lg">{systemConfig.appName}</h1>
                 </div>
               </div>
             </div>
@@ -321,7 +433,7 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
               <CardHeader>
                 <CardTitle className="text-lg">Currency Settings</CardTitle>
                 <CardDescription>
-                  Choose the currency symbol for displaying fines
+                  Choose the currency symbol for displaying fines (Default: Indian Rupee)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -335,12 +447,15 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="₹">₹ (Indian Rupee) - Default</SelectItem>
                       <SelectItem value="$">$ (US Dollar)</SelectItem>
-                      <SelectItem value="₹">₹ (Indian Rupee)</SelectItem>
                       <SelectItem value="€">€ (Euro)</SelectItem>
                       <SelectItem value="£">£ (British Pound)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Note: Currency is set to Indian Rupee (₹) by default for CCL Fines
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -406,8 +521,8 @@ export default function TopBar({ currentTab, user, onProfileClick, onSignOut }: 
               <Button variant="outline" onClick={() => setShowSettingsModal(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveSettings}>
-                Save Settings
+              <Button onClick={handleSaveSettings} disabled={isLoading}>
+                {isLoading ? "Saving..." : "Save Settings"}
               </Button>
             </div>
           </div>
