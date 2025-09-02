@@ -20,7 +20,6 @@ import {
   User, 
   UserCog, 
   UserRoundPlus, 
-  SlidersVertical, 
   Logs, 
   LayoutDashboard,
   ChevronRight,
@@ -88,11 +87,6 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
   const [fineReasons, setFineReasons] = useState<FineReason[]>([]);
   const [users, setUsers] = useState<UserRole[]>([]);
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
-  const [systemConfig, setSystemConfig] = useState<SystemConfig>({
-    currency: '$',
-    fineFrequency: 'match',
-    appName: 'CCL Fines',
-  });
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
@@ -102,7 +96,8 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const token = localStorage.getItem('bearer_token');
+        const session = JSON.parse(localStorage.getItem('better-auth-session') || '{}');
+        const token = session.token;
         const headers = {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -145,21 +140,6 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
           // Ensure users is always an array for non-superadmin users
           setUsers([]);
         }
-
-        // Fetch settings
-        const settingsResponse = await fetch('/api/settings', { headers });
-        if (settingsResponse.ok) {
-          const settingsData = await settingsResponse.json();
-          if (Array.isArray(settingsData) && settingsData.length > 0) {
-            const settings = settingsData[0];
-            setSystemConfig({
-              currency: settings.currency || '$',
-              fineFrequency: settings.fineFrequency || 'match',
-              appName: settings.appName || 'CCL Fines',
-              logoUrl: settings.logoUrl,
-            });
-          }
-        }
       } catch (error) {
         console.error('Error fetching data:', error);
         toast.error('Failed to load admin data');
@@ -192,7 +172,6 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
     { id: 'players', label: 'Players', icon: User },
     { id: 'reasons', label: 'Fine Reasons', icon: LayoutDashboard },
     { id: 'manage-users', label: 'Manage Users', icon: Users, superAdminOnly: true },
-    { id: 'customization', label: 'Customization', icon: SlidersVertical },
     { id: 'audit', label: 'Audit Log', icon: Logs, superAdminOnly: true },
     { id: 'info', label: 'Info', icon: PanelRightOpen },
   ].filter(tab => canAccessTab(tab.id));
@@ -213,7 +192,7 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold">Admin Panel</h1>
-          <p className="text-muted-foreground">Manage players, settings, and system configuration</p>
+          <p className="text-muted-foreground">Manage players, fine reasons, and system administration</p>
         </div>
         <Badge variant="secondary" className="text-sm">
           {userRole === 'superadmin' ? 'Super Admin' : 'Admin'}
@@ -221,7 +200,7 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-6 h-auto p-1">
+        <TabsList className="grid w-full grid-cols-3 lg:grid-cols-5 h-auto p-1">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -252,7 +231,6 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
             fineReasons={fineReasons}
             setFineReasons={setFineReasons}
             activeReasons={activeReasons}
-            systemConfig={systemConfig}
             userRole={userRole}
           />
         </TabsContent>
@@ -266,13 +244,6 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
             />
           </TabsContent>
         )}
-
-        <TabsContent value="customization">
-          <CustomizationTab 
-            systemConfig={systemConfig}
-            setSystemConfig={setSystemConfig}
-          />
-        </TabsContent>
 
         {canAccessTab('audit') && (
           <TabsContent value="audit">
@@ -745,13 +716,12 @@ function ReasonsTab({
   fineReasons, 
   setFineReasons, 
   activeReasons, 
-  systemConfig 
+  userRole 
 }: {
   fineReasons: FineReason[];
   setFineReasons: (reasons: FineReason[]) => void;
   activeReasons: FineReason[];
-  systemConfig: SystemConfig;
-  userRole?: 'admin' | 'super_admin';
+  userRole: 'admin' | 'super_admin';
 }) {
   const [showReasonForm, setShowReasonForm] = useState(false);
   const [editingReason, setEditingReason] = useState<FineReason | null>(null);
@@ -1413,123 +1383,6 @@ function ManageUsersTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-function CustomizationTab({ 
-  systemConfig, 
-  setSystemConfig 
-}: {
-  systemConfig: SystemConfig;
-  setSystemConfig: (config: SystemConfig) => void;
-}) {
-  const [tempConfig, setTempConfig] = useState(systemConfig);
-
-  const handleSave = () => {
-    setSystemConfig(tempConfig);
-    toast.success("Settings saved successfully");
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-display font-bold">Customization</h2>
-        <p className="text-muted-foreground">Configure app settings and branding</p>
-      </div>
-
-      <div className="grid gap-6 max-w-2xl">
-        <Card>
-          <CardHeader>
-            <CardTitle>Currency Settings</CardTitle>
-            <CardDescription>
-              Choose the currency symbol for displaying fines
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="currency">Currency Symbol</Label>
-              <Select 
-                value={tempConfig.currency} 
-                onValueChange={(value) => setTempConfig(prev => ({ ...prev, currency: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="$">$ (US Dollar)</SelectItem>
-                  <SelectItem value="₹">₹ (Indian Rupee)</SelectItem>
-                  <SelectItem value="€">€ (Euro)</SelectItem>
-                  <SelectItem value="£">£ (British Pound)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Fine Frequency</CardTitle>
-            <CardDescription>
-              Set how often fines are collected and reset
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="frequency">Collection Frequency</Label>
-              <Select 
-                value={tempConfig.fineFrequency} 
-                onValueChange={(value: 'match' | 'week' | 'season') => 
-                  setTempConfig(prev => ({ ...prev, fineFrequency: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="match">Per Match</SelectItem>
-                  <SelectItem value="week">Weekly</SelectItem>
-                  <SelectItem value="season">Per Season</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Branding</CardTitle>
-            <CardDescription>
-              Customize the app name and branding
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="app-name">App Name</Label>
-              <Input
-                id="app-name"
-                value={tempConfig.appName}
-                onChange={(e) => setTempConfig(prev => ({ ...prev, appName: e.target.value }))}
-                placeholder="CCL Fines"
-              />
-            </div>
-            <div>
-              <Label htmlFor="logo-url">Logo URL (optional)</Label>
-              <Input
-                id="logo-url"
-                value={tempConfig.logoUrl || ''}
-                onChange={(e) => setTempConfig(prev => ({ ...prev, logoUrl: e.target.value }))}
-                placeholder="https://example.com/logo.png"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-end">
-          <Button onClick={handleSave}>
-            Save Settings
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
