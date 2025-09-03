@@ -12,7 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { LogIn, User, EyeOff, View, MailCheck, LockKeyhole, RotateCcwKey } from "lucide-react";
-import { authClient } from "@/lib/auth-client";
+import { customAuthClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
 type AuthView = "login" | "signup" | "forgot" | "reset";
@@ -150,11 +150,10 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
   const onLogin = async (data: LoginForm) => {
     setIsLoading(true);
     try {
-      const { data: session, error } = await authClient.signIn.email({
+      const { data: session, error } = await customAuthClient.signIn.email({
         email: data.email,
         password: data.password,
         rememberMe: data.rememberMe,
-        callbackURL: "/"
       });
 
       if (error?.code) {
@@ -162,57 +161,8 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
         return;
       }
 
-      if (session?.user) {
-        // Store the bearer token for API calls
-        const token = localStorage.getItem("better-auth.session_token") || session.token;
-        if (token) {
-          localStorage.setItem("bearer_token", token);
-        }
-
-        // Get user role from database to ensure proper role mapping
-        try {
-          const userResponse = await fetch('/api/users', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (userResponse.ok) {
-            const users = await userResponse.json();
-            const currentUser = users.find((u: any) => u.email === session.user.email);
-            
-            if (currentUser) {
-              // Map better-auth user to app user format
-              const mappedUser = {
-                id: currentUser.id, // Use database user ID (number)
-                name: session.user.name || currentUser.name,
-                email: session.user.email,
-                image: session.user.image,
-                role: currentUser.role || "viewer"
-              };
-              
-              toast.success("Welcome back!");
-              onLoginSuccess(mappedUser);
-              return;
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching user role:', error);
-        }
-
-        // Fallback if user lookup fails
-        const fallbackUser = {
-          id: parseInt(session.user.id) || Date.now(), // Convert string ID to number
-          name: session.user.name || "User",
-          email: session.user.email,
-          image: session.user.image,
-          role: "viewer" as const
-        };
-        
-        toast.success("Welcome back!");
-        onLoginSuccess(fallbackUser);
-      }
+      toast.success("Welcome back!");
+      onLoginSuccess(session?.user);
     } catch (error) {
       console.error('Login error:', error);
       toast.error("Something went wrong. Please try again.");
@@ -224,7 +174,7 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
   const onSignup = async (data: SignupForm) => {
     setIsLoading(true);
     try {
-      const { data: session, error } = await authClient.signUp.email({
+      const { data: session, error } = await customAuthClient.signUp.email({
         email: data.email,
         name: data.name,
         password: data.password
@@ -232,16 +182,18 @@ export default function AuthPages({ onLoginSuccess }: AuthPagesProps) {
 
       if (error?.code) {
         const errorMap = {
-          USER_ALREADY_EXISTS: "Email already registered. Please try signing in instead."
+          USER_ALREADY_EXISTS: "Email already registered",
+          EMAIL_EXISTS: "Email already registered"
         };
         toast.error(errorMap[error.code as keyof typeof errorMap] || "Registration failed");
         return;
       }
 
       toast.success("Account created successfully! You can now sign in.");
-      // Switch to login view and pre-fill email
+      // Switch to login view instead of redirecting to non-existent route
       resetAllForms();
       setCurrentView("login");
+      // Pre-fill the email in login form
       loginForm.setValue("email", data.email);
     } catch (error) {
       console.error('Signup error:', error);

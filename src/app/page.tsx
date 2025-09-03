@@ -7,7 +7,7 @@ import AuthPages from "@/components/AuthPages";
 import FinesPanel from "@/components/FinesPanel";
 import ReportsPanel from "@/components/ReportsPanel";
 import AdminPanel from "@/components/AdminPanel";
-import { authClient, useSession } from "@/lib/auth-client";
+import { customAuthClient, useSession } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -30,12 +30,12 @@ export default function HomePage() {
   // Check authentication and update user state
   useEffect(() => {
     if (session?.user) {
-      // Map better-auth session to our user interface
+      // Map session to our user interface
       setUser({
-        id: session.user.id,
+        id: session.user.id.toString(),
         name: session.user.name,
         email: session.user.email,
-        image: session.user.image,
+        image: session.user.avatarUrl,
         role: session.user.role || "viewer" // Default to viewer if no role set
       });
     } else {
@@ -46,10 +46,10 @@ export default function HomePage() {
   const handleLoginSuccess = (userData: any) => {
     if (userData) {
       setUser({
-        id: userData.id,
+        id: userData.id.toString(),
         name: userData.name,
         email: userData.email,
-        image: userData.image,
+        image: userData.avatarUrl,
         role: userData.role || "viewer"
       });
       setActiveTab("Fines"); // Default to Fines tab
@@ -59,19 +59,11 @@ export default function HomePage() {
 
   const handleSignOut = async () => {
     try {
-      const token = localStorage.getItem("bearer_token");
-      const { error } = await authClient.signOut({
-        fetchOptions: {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      });
+      const { error } = await customAuthClient.signOut();
       
       if (error?.code) {
         toast.error(error.code);
       } else {
-        localStorage.removeItem("bearer_token");
         setUser(null);
         setActiveTab("Fines");
         refetch(); // Update session state

@@ -67,7 +67,6 @@ export const settings = sqliteTable('settings', {
   updatedAt: text('updated_at').notNull(),
 });
 
-
 // Auth tables for better-auth
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
