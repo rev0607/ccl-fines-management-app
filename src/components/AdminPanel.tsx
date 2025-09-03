@@ -7,27 +7,35 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { 
-  User, 
-  UserCog, 
-  UserRoundPlus, 
-  Logs, 
-  LayoutDashboard,
-  ChevronRight,
-  Undo,
-  PanelRightOpen,
-  Users,
-  Plus,
-  Edit
+  Plus, 
+  Search, 
+  Edit, 
+  Trash2, 
+  Users, 
+  UserCheck, 
+  UserX, 
+  RotateCcw,
+  Eye,
+  EyeOff,
+  Settings,
+  Shield,
+  Crown,
+  CheckCircle,
+  XCircle,
+  Calendar,
+  TrendingUp,
+  DollarSign,
+  FileText,
+  UserPlus,
+  Undo2,
+  ScrollText
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -48,31 +56,18 @@ interface FineReason {
   defaultAmount: number;
   description?: string;
   deletedAt?: string;
+  usageCount?: number;
 }
 
 interface UserRole {
   id: number;
   email: string;
   name: string;
-  role: 'viewer' | 'admin' | 'super_admin';
+  role: 'viewer' | 'admin' | 'superadmin';
   avatarUrl?: string;
   createdAt: string;
-}
-
-interface AuditEntry {
-  id: number;
-  fineId?: number;
-  action: 'add' | 'edit' | 'delete' | 'restore';
-  userEmail: string;
-  timestamp: string;
-  details: string;
-}
-
-interface SystemConfig {
-  currency: string;
-  fineFrequency: 'match' | 'week' | 'season';
-  appName: string;
-  logoUrl?: string;
+  isActive?: boolean;
+  lastLoginAt?: string;
 }
 
 interface AdminPanelProps {
@@ -86,18 +81,68 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [fineReasons, setFineReasons] = useState<FineReason[]>([]);
   const [users, setUsers] = useState<UserRole[]>([]);
-  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
+
+  // UI states
+  const [showDeletedPlayers, setShowDeletedPlayers] = useState(false);
+  const [showDeletedReasons, setShowDeletedReasons] = useState(false);
+
+  // Add data refresh mechanism
+  const refreshAllData = async () => {
+    const token = localStorage.getItem('bearer_token');
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      // Refresh players
+      const playersResponse = await fetch('/api/players', { headers });
+      if (playersResponse.ok) {
+        const playersData = await playersResponse.json();
+        setPlayers(Array.isArray(playersData) ? playersData : []);
+      }
+
+      // Refresh fine reasons
+      const reasonsResponse = await fetch('/api/fine-reasons', { headers });
+      if (reasonsResponse.ok) {
+        const reasonsData = await reasonsResponse.json();
+        setFineReasons(Array.isArray(reasonsData) ? reasonsData : []);
+      }
+
+      // Refresh users (only for super admin)
+      if (userRole === 'superadmin') {
+        const usersResponse = await fetch('/api/users', { headers });
+        if (usersResponse.ok) {
+          const usersData = await usersResponse.json();
+          setUsers(Array.isArray(usersData) ? usersData : []);
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    }
+  };
+
+  // Listen for storage events to refresh data when other tabs make changes
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'players_data_updated' || e.key === 'fine_reasons_data_updated') {
+        refreshAllData();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [userRole]);
 
   // Fetch all data on mount
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const session = JSON.parse(localStorage.getItem('better-auth-session') || '{}');
-        const token = session.token;
+        const token = localStorage.getItem('bearer_token');
         const headers = {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -127,27 +172,16 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
             console.error('Failed to fetch users:', usersResponse.status);
             setUsers([]);
           }
-
-          // Fetch audit log
-          const auditResponse = await fetch('/api/audit-logs', { headers });
-          if (auditResponse.ok) {
-            const auditData = await auditResponse.json();
-            setAuditLog(Array.isArray(auditData) ? auditData : []);
-          } else {
-            setAuditLog([]);
-          }
         } else {
-          // Ensure users is always an array for non-superadmin users
           setUsers([]);
         }
+
       } catch (error) {
         console.error('Error fetching data:', error);
         toast.error('Failed to load admin data');
-        // Ensure all arrays are properly initialized even on error
         setPlayers([]);
         setFineReasons([]);
         setUsers([]);
-        setAuditLog([]);
       } finally {
         setIsLoading(false);
       }
@@ -156,25 +190,8 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
     fetchData();
   }, [userRole]);
 
-  // Filter functions
-  const activePlayers = players.filter(player => !player.deletedAt);
-  const deletedPlayers = players.filter(player => player.deletedAt);
-  const activeReasons = fineReasons.filter(reason => !reason.deletedAt);
-
-  const canAccessTab = (tab: string) => {
-    if (tab === 'manage-users' || tab === 'audit') {
-      return userRole === 'superadmin';
-    }
-    return true;
-  };
-
-  const tabs = [
-    { id: 'players', label: 'Players', icon: User },
-    { id: 'reasons', label: 'Fine Reasons', icon: LayoutDashboard },
-    { id: 'manage-users', label: 'Manage Users', icon: Users, superAdminOnly: true },
-    { id: 'audit', label: 'Audit Log', icon: Logs, superAdminOnly: true },
-    { id: 'info', label: 'Info', icon: PanelRightOpen },
-  ].filter(tab => canAccessTab(tab.id));
+  const canManageAll = userRole === "superadmin";
+  const canManageBasic = userRole === "admin" || userRole === "superadmin";
 
   if (isLoading) {
     return (
@@ -187,96 +204,82 @@ export default function AdminPanel({ userRole = "admin" }: AdminPanelProps) {
     );
   }
 
+  if (!canManageBasic) {
+    return (
+      <div className="w-full max-w-7xl mx-auto p-6">
+        <Card>
+          <CardContent className="text-center py-12">
+            <Shield className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+            <h2 className="text-xl font-semibold mb-2">Access Restricted</h2>
+            <p className="text-muted-foreground">
+              You don't have permission to access the admin panel. 
+              Contact your system administrator for access.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-7xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold">Admin Panel</h1>
-          <p className="text-muted-foreground">Manage players, fine reasons, and system administration</p>
+          <p className="text-muted-foreground">
+            Manage players, fine reasons, and system settings
+          </p>
         </div>
-        <Badge variant="secondary" className="text-sm">
-          {userRole === 'superadmin' ? 'Super Admin' : 'Admin'}
-        </Badge>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 lg:grid-cols-5 h-auto p-1">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <TabsTrigger 
-                key={tab.id} 
-                value={tab.id}
-                className="flex flex-col items-center gap-1 p-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-              >
-                <Icon className="h-4 w-4" />
-                <span className="text-xs font-medium">{tab.label}</span>
-              </TabsTrigger>
-            );
-          })}
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="players">Players</TabsTrigger>
+          <TabsTrigger value="reasons">Fine Reasons</TabsTrigger>
+          {canManageAll && <TabsTrigger value="users">Users</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="players">
-          <PlayersTab 
-            players={players} 
+          <ManagePlayersTab 
+            players={players}
             setPlayers={setPlayers}
-            activePlayers={activePlayers}
-            deletedPlayers={deletedPlayers}
-            userRole={userRole}
+            showDeletedPlayers={showDeletedPlayers}
+            setShowDeletedPlayers={setShowDeletedPlayers}
           />
         </TabsContent>
 
         <TabsContent value="reasons">
-          <ReasonsTab 
+          <ManageFineReasonsTab 
             fineReasons={fineReasons}
             setFineReasons={setFineReasons}
-            activeReasons={activeReasons}
-            userRole={userRole}
+            showDeletedReasons={showDeletedReasons}
+            setShowDeletedReasons={setShowDeletedReasons}
           />
         </TabsContent>
 
-        {canAccessTab('manage-users') && (
-          <TabsContent value="manage-users">
+        {canManageAll && (
+          <TabsContent value="users">
             <ManageUsersTab 
               users={users}
               setUsers={setUsers}
-              currentUserRole={userRole}
             />
           </TabsContent>
         )}
-
-        {canAccessTab('audit') && (
-          <TabsContent value="audit">
-            <AuditTab auditLog={auditLog} />
-          </TabsContent>
-        )}
-
-        <TabsContent value="info">
-          <InfoTab />
-        </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function PlayersTab({ 
-  players, 
-  setPlayers, 
-  activePlayers, 
-  deletedPlayers, 
-  userRole 
-}: {
+interface ManagePlayersTabProps {
   players: Player[];
   setPlayers: (players: Player[]) => void;
-  activePlayers: Player[];
-  deletedPlayers: Player[];
-  userRole: 'admin' | 'super_admin';
-}) {
+  showDeletedPlayers: boolean;
+  setShowDeletedPlayers: (show: boolean) => void;
+}
+
+function ManagePlayersTab({ players, setPlayers, showDeletedPlayers, setShowDeletedPlayers }: ManagePlayersTabProps) {
   const [showPlayerForm, setShowPlayerForm] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [showDeletedPlayers, setShowDeletedPlayers] = useState(false);
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [playerForm, setPlayerForm] = useState({
     name: '',
@@ -285,186 +288,307 @@ function PlayersTab({
     position: ''
   });
 
-  const handleAddPlayer = () => {
+  const activePlayers = players.filter(player => !player.deletedAt);
+  const deletedPlayers = players.filter(player => player.deletedAt);
+
+  const handleAddPlayer = async () => {
     if (!playerForm.name || !playerForm.email || !playerForm.jerseyNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const newPlayer: Player = {
-      id: Date.now(),
-      name: playerForm.name,
-      email: playerForm.email,
-      jerseyNumber: playerForm.jerseyNumber,
-      position: playerForm.position,
-      totalFines: 0,
-      deletedAt: undefined,
-      createdAt: new Date().toISOString().split('T')[0]
-    };
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch('/api/players', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: playerForm.name,
+          email: playerForm.email,
+          jersey_number: playerForm.jerseyNumber,
+          position: playerForm.position
+        }),
+      });
 
-    setPlayers([...players, newPlayer]);
-    setPlayerForm({ name: '', email: '', jerseyNumber: '', position: '' });
-    setShowPlayerForm(false);
-    toast.success("Player added successfully");
+      if (response.ok) {
+        const newPlayer = await response.json();
+        setPlayers([...players, newPlayer]);
+        setPlayerForm({ name: '', email: '', jerseyNumber: '', position: '' });
+        setShowPlayerForm(false);
+        toast.success("Player added successfully");
+        localStorage.setItem('players_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to add player");
+      }
+    } catch (error) {
+      console.error('Add player error:', error);
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleEditPlayer = () => {
-    if (!editingPlayer) return;
-    
-    const updatedPlayers = players.map(p => 
-      p.id === editingPlayer.id ? editingPlayer : p
-    );
-    setPlayers(updatedPlayers);
-    setEditingPlayer(null);
-    toast.success("Player updated successfully");
+  const handleSoftDeletePlayer = async (playerId: number) => {
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/players/${playerId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const updatedPlayers = players.map(p => 
+          p.id === playerId ? { ...p, deletedAt: new Date().toISOString() } : p
+        );
+        setPlayers(updatedPlayers);
+        toast.success("Player deleted successfully");
+        localStorage.setItem('players_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to delete player");
+      }
+    } catch (error) {
+      console.error('Delete player error:', error);
+      toast.error("Something went wrong. Please try again.");
+    }
   };
 
-  const handleSoftDeletePlayer = (playerId: number) => {
-    const updatedPlayers = players.map(p => 
-      p.id === playerId ? { ...p, deletedAt: new Date().toISOString() } : p
-    );
-    setPlayers(updatedPlayers);
-    toast.success("Player deleted successfully");
-  };
+  const handleRestorePlayer = async (playerId: number) => {
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/players/${playerId}/restore`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
 
-  const handleRestorePlayer = (playerId: number) => {
-    const updatedPlayers = players.map(p => 
-      p.id === playerId ? { ...p, deletedAt: undefined } : p
-    );
-    setPlayers(updatedPlayers);
-    toast.success("Player restored successfully");
+      if (response.ok) {
+        const updatedPlayers = players.map(p => 
+          p.id === playerId ? { ...p, deletedAt: undefined } : p
+        );
+        setPlayers(updatedPlayers);
+        toast.success("Player restored successfully");
+        localStorage.setItem('players_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to restore player");
+      }
+    } catch (error) {
+      console.error('Restore player error:', error);
+      toast.error("Something went wrong. Please try again.");
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-display font-bold">Players Management</h2>
+          <h3 className="text-xl font-semibold">Manage Players</h3>
           <p className="text-muted-foreground">Add, edit, and manage team players</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setShowDeletedPlayers(!showDeletedPlayers)}
-            className="flex items-center gap-2"
-          >
-            <Undo className="h-4 w-4" />
-            {showDeletedPlayers ? 'Hide Deleted' : 'Show Deleted'}
-          </Button>
-          <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
-            <DialogTrigger asChild>
-              <Button variant="outline">Import CSV</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Import Players from CSV</DialogTitle>
-                <DialogDescription>
-                  Upload a CSV file with player data. Required columns: Name, Email, Jersey, Position
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <Input type="file" accept=".csv" />
-                <div className="p-4 bg-muted rounded-lg">
-                  <p className="text-sm font-medium mb-2">CSV Preview:</p>
-                  <pre className="text-xs text-muted-foreground">
-{`Name,Email,Jersey,Position
-John Doe,john@example.com,10,Forward
-Jane Smith,jane@example.com,7,Midfielder`}
-                  </pre>
-                </div>
+        <Dialog open={showPlayerForm} onOpenChange={setShowPlayerForm}>
+          <DialogTrigger asChild>
+            <Button className="flex items-center gap-2">
+              <UserPlus className="h-4 w-4" />
+              Add Player
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add New Player</DialogTitle>
+              <DialogDescription>
+                Add a new player to the team roster
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="name">Name *</Label>
+                <Input
+                  id="name"
+                  value={playerForm.name}
+                  onChange={(e) => setPlayerForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Enter player name"
+                />
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setShowImportModal(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={() => {
-                  setShowImportModal(false);
-                  toast.success("CSV import completed successfully");
-                }}>
-                  Import Players
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          <Dialog open={showPlayerForm} onOpenChange={setShowPlayerForm}>
-            <DialogTrigger asChild>
-              <Button className="flex items-center gap-2">
-                <UserRoundPlus className="h-4 w-4" />
-                Add Player
+              <div>
+                <Label htmlFor="email">Email *</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={playerForm.email}
+                  onChange={(e) => setPlayerForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="Enter email address"
+                />
+              </div>
+              <div>
+                <Label htmlFor="jersey">Jersey Number *</Label>
+                <Input
+                  id="jersey"
+                  value={playerForm.jerseyNumber}
+                  onChange={(e) => setPlayerForm(prev => ({ ...prev, jerseyNumber: e.target.value }))}
+                  placeholder="Enter jersey number"
+                />
+              </div>
+              <div>
+                <Label htmlFor="position">Position</Label>
+                <Select 
+                  value={playerForm.position} 
+                  onValueChange={(value) => setPlayerForm(prev => ({ ...prev, position: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select position" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
+                    <SelectItem value="defender">Defender</SelectItem>
+                    <SelectItem value="midfielder">Midfielder</SelectItem>
+                    <SelectItem value="forward">Forward</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowPlayerForm(false)}>
+                Cancel
               </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add New Player</DialogTitle>
-                <DialogDescription>
-                  Add a new player to the team roster
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="name">Name *</Label>
-                  <Input
-                    id="name"
-                    value={playerForm.name}
-                    onChange={(e) => setPlayerForm(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="Enter player name"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="email">Email *</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={playerForm.email}
-                    onChange={(e) => setPlayerForm(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="Enter email address"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="jersey">Jersey Number *</Label>
-                  <Input
-                    id="jersey"
-                    value={playerForm.jerseyNumber}
-                    onChange={(e) => setPlayerForm(prev => ({ ...prev, jerseyNumber: e.target.value }))}
-                    placeholder="Enter jersey number"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="position">Position</Label>
-                  <Select 
-                    value={playerForm.position} 
-                    onValueChange={(value) => setPlayerForm(prev => ({ ...prev, position: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select position" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
-                      <SelectItem value="defender">Defender</SelectItem>
-                      <SelectItem value="midfielder">Midfielder</SelectItem>
-                      <SelectItem value="forward">Forward</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setShowPlayerForm(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleAddPlayer}>Add Player</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
+              <Button onClick={handleAddPlayer} disabled={isSubmitting}>
+                {isSubmitting ? "Adding..." : "Add Player"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <div className="grid gap-6">
-        {/* Active Players */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Players ({showDeletedPlayers ? players.length : activePlayers.length})
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDeletedPlayers(!showDeletedPlayers)}
+              className="flex items-center gap-2"
+            >
+              {showDeletedPlayers ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showDeletedPlayers ? 'Hide Deleted' : 'Show Deleted'}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Player</TableHead>
+                <TableHead>Jersey #</TableHead>
+                <TableHead>Position</TableHead>
+                <TableHead>Total Fines</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {players
+                .filter(player => showDeletedPlayers || !player.deletedAt)
+                .map((player) => (
+                  <TableRow key={player.id} className={player.deletedAt ? "opacity-50" : ""}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                          <span className="text-xs font-medium">
+                            {player.name.charAt(0)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-medium">{player.name}</span>
+                          <div className="text-xs text-muted-foreground">{player.email}</div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">#{player.jerseyNumber}</Badge>
+                    </TableCell>
+                    <TableCell>{player.position}</TableCell>
+                    <TableCell>
+                      <Badge variant="destructive" className="font-mono">
+                        ₹{player.totalFines || 0}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {player.deletedAt ? (
+                        <Badge variant="outline">Deleted</Badge>
+                      ) : (
+                        <Badge variant="default">Active</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {!player.deletedAt ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Player</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete {player.name}? 
+                                  This will soft delete the player and they can be restored later.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleSoftDeletePlayer(player.id)}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleRestorePlayer(player.id)}
+                            className="flex items-center gap-2"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Restore
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+          {players.length === 0 && (
+            <div className="text-center py-8">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">No players found</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Deleted Players */}
+      {showDeletedPlayers && deletedPlayers.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Active Players ({activePlayers.length})
+            <CardTitle className="flex items-center gap-2 text-muted-foreground">
+              <Undo2 className="h-5 w-5" />
+              Deleted Players ({deletedPlayers.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -474,13 +598,12 @@ Jane Smith,jane@example.com,7,Midfielder`}
                   <TableHead>Name</TableHead>
                   <TableHead>Jersey</TableHead>
                   <TableHead>Position</TableHead>
-                  <TableHead>Total Fines</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {activePlayers.map((player) => (
-                  <TableRow key={player.id}>
+                {deletedPlayers.map((player) => (
+                  <TableRow key={player.id} className="opacity-75">
                     <TableCell>
                       <div>
                         <p className="font-medium">{player.name}</p>
@@ -489,166 +612,18 @@ Jane Smith,jane@example.com,7,Midfielder`}
                     </TableCell>
                     <TableCell>#{player.jerseyNumber}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{player.position}</Badge>
+                      <Badge variant="outline">{player.position}</Badge>
                     </TableCell>
-                    <TableCell>${player.totalFines || 0}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Sheet>
-                          <SheetTrigger asChild>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => setSelectedPlayer(player)}
-                            >
-                              View Details
-                            </Button>
-                          </SheetTrigger>
-                          <SheetContent className="w-[400px] sm:w-[540px]">
-                            <SheetHeader>
-                              <SheetTitle>{player.name}</SheetTitle>
-                              <SheetDescription>
-                                Player details and fine history
-                              </SheetDescription>
-                            </SheetHeader>
-                            <div className="mt-6 space-y-6">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <Label className="text-sm font-medium">Jersey</Label>
-                                  <p className="text-sm text-muted-foreground">#{player.jerseyNumber}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Position</Label>
-                                  <p className="text-sm text-muted-foreground">{player.position}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Total Fines</Label>
-                                  <p className="text-sm font-medium text-destructive">${player.totalFines || 0}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Joined</Label>
-                                  <p className="text-sm text-muted-foreground">{player.createdAt}</p>
-                                </div>
-                              </div>
-                              <Separator />
-                              <div>
-                                <h4 className="text-sm font-medium mb-3">Fine History</h4>
-                                <div className="space-y-3">
-                                  <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
-                                    <div>
-                                      <p className="text-sm font-medium">Late to Training</p>
-                                      <p className="text-xs text-muted-foreground">2024-01-18</p>
-                                    </div>
-                                    <Badge variant="destructive">$25</Badge>
-                                  </div>
-                                  <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
-                                    <div>
-                                      <p className="text-sm font-medium">Missed Practice</p>
-                                      <p className="text-xs text-muted-foreground">2024-01-15</p>
-                                    </div>
-                                    <Badge variant="destructive">$50</Badge>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </SheetContent>
-                        </Sheet>
-                        <Dialog open={editingPlayer?.id === player.id} onOpenChange={(open) => {
-                          if (!open) setEditingPlayer(null);
-                          else setEditingPlayer(player);
-                        }}>
-                          <DialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              Edit
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Edit Player</DialogTitle>
-                            </DialogHeader>
-                            {editingPlayer && (
-                              <div className="space-y-4">
-                                <div>
-                                  <Label>Name</Label>
-                                  <Input
-                                    value={editingPlayer.name}
-                                    onChange={(e) => setEditingPlayer(prev => 
-                                      prev ? { ...prev, name: e.target.value } : null
-                                    )}
-                                  />
-                                </div>
-                                <div>
-                                  <Label>Email</Label>
-                                  <Input
-                                    value={editingPlayer.email}
-                                    onChange={(e) => setEditingPlayer(prev => 
-                                      prev ? { ...prev, email: e.target.value } : null
-                                    )}
-                                  />
-                                </div>
-                                <div>
-                                  <Label>Jersey</Label>
-                                  <Input
-                                    value={editingPlayer.jerseyNumber}
-                                    onChange={(e) => setEditingPlayer(prev => 
-                                      prev ? { ...prev, jerseyNumber: e.target.value } : null
-                                    )}
-                                  />
-                                </div>
-                                <div>
-                                  <Label>Position</Label>
-                                  <Select 
-                                    value={editingPlayer.position} 
-                                    onValueChange={(value) => setEditingPlayer(prev => 
-                                      prev ? { ...prev, position: value } : null
-                                    )}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
-                                      <SelectItem value="defender">Defender</SelectItem>
-                                      <SelectItem value="midfielder">Midfielder</SelectItem>
-                                      <SelectItem value="forward">Forward</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                            )}
-                            <DialogFooter>
-                              <Button variant="outline" onClick={() => setEditingPlayer(null)}>
-                                Cancel
-                              </Button>
-                              <Button onClick={handleEditPlayer}>Save Changes</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm">
-                              Delete
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Player</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Are you sure you want to delete {player.name}? This will soft-delete the player and they can be restored later.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction 
-                                onClick={() => handleSoftDeletePlayer(player.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRestorePlayer(player.id)}
+                        className="flex items-center gap-2"
+                      >
+                        <Undo2 className="h-4 w-4" />
+                        Restore
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -656,166 +631,181 @@ Jane Smith,jane@example.com,7,Midfielder`}
             </Table>
           </CardContent>
         </Card>
-
-        {/* Deleted Players */}
-        {showDeletedPlayers && deletedPlayers.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-muted-foreground">
-                <Undo className="h-5 w-5" />
-                Deleted Players ({deletedPlayers.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Jersey</TableHead>
-                    <TableHead>Position</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {deletedPlayers.map((player) => (
-                    <TableRow key={player.id} className="opacity-75">
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{player.name}</p>
-                          <p className="text-sm text-muted-foreground">{player.email}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>#{player.jerseyNumber}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{player.position}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRestorePlayer(player.id)}
-                          className="flex items-center gap-2"
-                        >
-                          <Undo className="h-4 w-4" />
-                          Restore
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      )}
     </div>
   );
 }
 
-function ReasonsTab({ 
-  fineReasons, 
-  setFineReasons, 
-  activeReasons, 
-  userRole 
-}: {
+interface ManageFineReasonsTabProps {
   fineReasons: FineReason[];
   setFineReasons: (reasons: FineReason[]) => void;
-  activeReasons: FineReason[];
-  userRole: 'admin' | 'super_admin';
-}) {
+  showDeletedReasons: boolean;
+  setShowDeletedReasons: (show: boolean) => void;
+}
+
+function ManageFineReasonsTab({ fineReasons, setFineReasons, showDeletedReasons, setShowDeletedReasons }: ManageFineReasonsTabProps) {
   const [showReasonForm, setShowReasonForm] = useState(false);
-  const [editingReason, setEditingReason] = useState<FineReason | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [reasonForm, setReasonForm] = useState({
     name: '',
     defaultAmount: 0,
     description: ''
   });
 
-  const handleAddReason = () => {
+  const handleAddReason = async () => {
     if (!reasonForm.name || reasonForm.defaultAmount <= 0) {
       toast.error("Please provide a valid name and amount");
       return;
     }
 
-    const newReason: FineReason = {
-      id: Date.now(),
-      name: reasonForm.name,
-      defaultAmount: reasonForm.defaultAmount,
-      description: reasonForm.description,
-      deletedAt: undefined
-    };
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch('/api/fine-reasons', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reason: reasonForm.name,
+          default_amount: reasonForm.defaultAmount,
+          description: reasonForm.description
+        }),
+      });
 
-    setFineReasons([...fineReasons, newReason]);
-    setReasonForm({ name: '', defaultAmount: 0, description: '' });
-    setShowReasonForm(false);
-    toast.success("Fine reason added successfully");
+      if (response.ok) {
+        const newReason = await response.json();
+        const transformedReason: FineReason = {
+          id: newReason.id,
+          name: newReason.name,
+          defaultAmount: newReason.defaultAmount,
+          description: newReason.description,
+          deletedAt: newReason.deletedAt,
+          usageCount: newReason.usageCount
+        };
+        setFineReasons([...fineReasons, transformedReason]);
+        setReasonForm({ name: '', defaultAmount: 0, description: '' });
+        setShowReasonForm(false);
+        toast.success("Fine reason added successfully");
+        localStorage.setItem('fine_reasons_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to add fine reason");
+      }
+    } catch (error) {
+      console.error('Add fine reason error:', error);
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleEditReason = () => {
-    if (!editingReason) return;
-    
-    const updatedReasons = fineReasons.map(r => 
-      r.id === editingReason.id ? editingReason : r
-    );
-    setFineReasons(updatedReasons);
-    setEditingReason(null);
-    toast.success("Fine reason updated successfully");
+  const handleDeleteReason = async (reasonId: number) => {
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/fine-reasons/${reasonId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const updatedReasons = fineReasons.map(r => 
+          r.id === reasonId ? { ...r, deletedAt: new Date().toISOString() } : r
+        );
+        setFineReasons(updatedReasons);
+        toast.success("Fine reason deleted successfully");
+        localStorage.setItem('fine_reasons_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to delete fine reason");
+      }
+    } catch (error) {
+      console.error('Delete fine reason error:', error);
+      toast.error("Something went wrong. Please try again.");
+    }
   };
 
-  const handleDeleteReason = (reasonId: number) => {
-    const updatedReasons = fineReasons.map(r => 
-      r.id === reasonId ? { ...r, deletedAt: new Date().toISOString() } : r
-    );
-    setFineReasons(updatedReasons);
-    toast.success("Fine reason deleted successfully");
+  const handleRestoreReason = async (reasonId: number) => {
+    try {
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch(`/api/fine-reasons/${reasonId}/restore`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const updatedReasons = fineReasons.map(r => 
+          r.id === reasonId ? { ...r, deletedAt: undefined } : r
+        );
+        setFineReasons(updatedReasons);
+        toast.success("Fine reason restored successfully");
+        localStorage.setItem('fine_reasons_data_updated', Date.now().toString());
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to restore fine reason");
+      }
+    } catch (error) {
+      console.error('Restore fine reason error:', error);
+      toast.error("Something went wrong. Please try again.");
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-display font-bold">Fine Reasons</h2>
-          <p className="text-muted-foreground">Manage fine types and their default amounts</p>
+          <h3 className="text-xl font-semibold">Manage Fine Reasons</h3>
+          <p className="text-muted-foreground">Configure fine types and default amounts</p>
         </div>
         <Dialog open={showReasonForm} onOpenChange={setShowReasonForm}>
           <DialogTrigger asChild>
-            <Button>Add Fine Reason</Button>
+            <Button className="flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Add Fine Reason
+            </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add Fine Reason</DialogTitle>
+              <DialogTitle>Add New Fine Reason</DialogTitle>
               <DialogDescription>
-                Create a new fine reason with a default amount
+                Create a new fine reason with default amount
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="reason-name">Reason Name *</Label>
+                <Label htmlFor="reasonName">Reason Name *</Label>
                 <Input
-                  id="reason-name"
+                  id="reasonName"
                   value={reasonForm.name}
                   onChange={(e) => setReasonForm(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="e.g. Late to Training"
                 />
               </div>
               <div>
-                <Label htmlFor="reason-amount">Default Amount ({systemConfig.currency}) *</Label>
+                <Label htmlFor="defaultAmount">Default Amount (₹) *</Label>
                 <Input
-                  id="reason-amount"
+                  id="defaultAmount"
                   type="number"
                   min="0"
+                  step="0.01"
                   value={reasonForm.defaultAmount}
                   onChange={(e) => setReasonForm(prev => ({ ...prev, defaultAmount: Number(e.target.value) }))}
                   placeholder="25"
                 />
               </div>
               <div>
-                <Label htmlFor="reason-description">Description</Label>
+                <Label htmlFor="description">Description</Label>
                 <Textarea
-                  id="reason-description"
+                  id="description"
                   value={reasonForm.description}
                   onChange={(e) => setReasonForm(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="Describe when this fine applies"
+                  rows={3}
                 />
               </div>
             </div>
@@ -823,7 +813,9 @@ function ReasonsTab({
               <Button variant="outline" onClick={() => setShowReasonForm(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleAddReason}>Add Reason</Button>
+              <Button onClick={handleAddReason} disabled={isSubmitting}>
+                {isSubmitting ? "Adding..." : "Add Reason"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -831,145 +823,144 @@ function ReasonsTab({
 
       <Card>
         <CardHeader>
-          <CardTitle>Active Fine Reasons ({activeReasons.length})</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Fine Reasons ({showDeletedReasons ? fineReasons.length : fineReasons.filter(r => !r.deletedAt).length})
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDeletedReasons(!showDeletedReasons)}
+              className="flex items-center gap-2"
+            >
+              {showDeletedReasons ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showDeletedReasons ? 'Hide Deleted' : 'Show Deleted'}
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Reason</TableHead>
                 <TableHead>Default Amount</TableHead>
-                <TableHead>Description</TableHead>
+                <TableHead>Usage Count</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {activeReasons.map((reason) => (
-                <TableRow key={reason.id}>
-                  <TableCell>
-                    <p className="font-medium">{reason.name}</p>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {systemConfig.currency}{reason.defaultAmount}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm text-muted-foreground">
-                      {reason.description || 'No description'}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Dialog open={editingReason?.id === reason.id} onOpenChange={(open) => {
-                        if (!open) setEditingReason(null);
-                        else setEditingReason(reason);
-                      }}>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            Edit
+              {fineReasons
+                .filter(reason => showDeletedReasons || !reason.deletedAt)
+                .map((reason) => (
+                  <TableRow key={reason.id} className={reason.deletedAt ? "opacity-50" : ""}>
+                    <TableCell>
+                      <div>
+                        <span className="font-medium">{reason.name}</span>
+                        {reason.description && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {reason.description}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="font-mono">
+                        ₹{reason.defaultAmount}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {reason.usageCount || 0} times
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {reason.deletedAt ? (
+                        <Badge variant="outline">Deleted</Badge>
+                      ) : (
+                        <Badge variant="default">Active</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {!reason.deletedAt ? (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Fine Reason</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete "{reason.name}"? 
+                                  This will soft delete the reason and it can be restored later.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteReason(reason.id)}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleRestoreReason(reason.id)}
+                            className="flex items-center gap-2"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Restore
                           </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Edit Fine Reason</DialogTitle>
-                          </DialogHeader>
-                          {editingReason && (
-                            <div className="space-y-4">
-                              <div>
-                                <Label>Reason Name</Label>
-                                <Input
-                                  value={editingReason.name}
-                                  onChange={(e) => setEditingReason(prev => 
-                                    prev ? { ...prev, name: e.target.value } : null
-                                  )}
-                                />
-                              </div>
-                              <div>
-                                <Label>Default Amount ({systemConfig.currency})</Label>
-                                <Input
-                                  type="number"
-                                  value={editingReason.defaultAmount}
-                                  onChange={(e) => setEditingReason(prev => 
-                                    prev ? { ...prev, defaultAmount: Number(e.target.value) } : null
-                                  )}
-                                />
-                              </div>
-                              <div>
-                                <Label>Description</Label>
-                                <Textarea
-                                  value={editingReason.description || ''}
-                                  onChange={(e) => setEditingReason(prev => 
-                                    prev ? { ...prev, description: e.target.value } : null
-                                  )}
-                                />
-                              </div>
-                            </div>
-                          )}
-                          <DialogFooter>
-                            <Button variant="outline" onClick={() => setEditingReason(null)}>
-                              Cancel
-                            </Button>
-                            <Button onClick={handleEditReason}>Save Changes</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            Delete
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Fine Reason</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Are you sure you want to delete "{reason.name}"? This action will soft-delete the reason.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction 
-                              onClick={() => handleDeleteReason(reason.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
             </TableBody>
           </Table>
+          {fineReasons.length === 0 && (
+            <div className="text-center py-8">
+              <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">No fine reasons found</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function ManageUsersTab({ 
-  users, 
-  setUsers, 
-  currentUserRole 
-}: {
+interface ManageUsersTabProps {
   users: UserRole[];
   setUsers: (users: UserRole[]) => void;
-  currentUserRole: 'admin' | 'superadmin';
-}) {
-  const [showPromoteConfirm, setShowPromoteConfirm] = useState<UserRole | null>(null);
+}
+
+function ManageUsersTab({ users, setUsers }: ManageUsersTabProps) {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserRole | null>(null);
+  const [showPromoteConfirm, setShowPromoteConfirm] = useState<UserRole | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [userForm, setUserForm] = useState({
+    name: '',
     email: '',
-    role: 'viewer' as 'viewer' | 'admin'
+    password: '',
+    role: 'viewer' as 'viewer' | 'admin' | 'superadmin'
   });
 
+  // Group users by role for better organization
+  const usersByRole = {
+    super_admin: users.filter(u => u.role === 'superadmin'),
+    admin: users.filter(u => u.role === 'admin'),
+    viewer: users.filter(u => u.role === 'viewer')
+  };
+
   const handleAddUser = async () => {
-    if (!userForm.email || !userForm.role) {
+    if (!userForm.name || !userForm.email || !userForm.password || !userForm.role) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -979,6 +970,15 @@ function ManageUsersTab({
     if (existingUser) {
       toast.error("User with this email already exists");
       return;
+    }
+
+    // Special handling for super admin role
+    if (userForm.role === 'superadmin') {
+      const currentSuperAdmin = users.find(u => u.role === 'superadmin');
+      if (currentSuperAdmin) {
+        toast.error("Only one Super Admin can exist. Please demote the current Super Admin first.");
+        return;
+      }
     }
 
     setIsUpdating(true);
@@ -991,9 +991,10 @@ function ManageUsersTab({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          name: userForm.name,
           email: userForm.email,
-          role: userForm.role,
-          name: userForm.email.split('@')[0] // Use email prefix as default name
+          password: userForm.password,
+          role: userForm.role
         }),
       });
 
@@ -1001,14 +1002,19 @@ function ManageUsersTab({
         const newUser = await response.json();
         setUsers([...users, {
           id: newUser.id,
-          email: newUser.email,
           name: newUser.name,
+          email: newUser.email,
           role: newUser.role,
-          createdAt: newUser.createdAt
+          createdAt: newUser.createdAt,
+          isActive: newUser.isActive,
+          lastLoginAt: newUser.lastLoginAt
         }]);
-        setUserForm({ email: '', role: 'viewer' });
+        setUserForm({ name: '', email: '', password: '', role: 'viewer' });
         setShowAddUserModal(false);
-        toast.success(`User added successfully with ${userForm.role} access`);
+        
+        const roleDisplay = userForm.role === 'superadmin' ? 'Super Admin' : 
+                           userForm.role === 'admin' ? 'Admin' : 'Viewer';
+        toast.success(`User added successfully with ${roleDisplay} access`);
       } else {
         const error = await response.json();
         toast.error(error.error || 'Failed to add user');
@@ -1021,8 +1027,8 @@ function ManageUsersTab({
     }
   };
 
-  const handleRoleChange = async (userId: number, newRole: 'viewer' | 'admin' | 'super_admin') => {
-    if (newRole === 'super_admin') {
+  const handleUpdateUserRole = async (userId: number, newRole: 'viewer' | 'admin' | 'superadmin') => {
+    if (newRole === 'superadmin') {
       const user = users.find(u => u.id === userId);
       if (user) {
         setShowPromoteConfirm(user);
@@ -1047,7 +1053,8 @@ function ManageUsersTab({
           u.id === userId ? { ...u, role: newRole } : u
         );
         setUsers(updatedUsers);
-        toast.success(`User role updated to ${newRole}`);
+        const roleDisplay = newRole === 'admin' ? 'Admin' : 'Viewer';
+        toast.success(`User role updated to ${roleDisplay}`);
       } else {
         const error = await response.json();
         toast.error(error.error || 'Failed to update user role');
@@ -1072,17 +1079,17 @@ function ManageUsersTab({
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ role: 'super_admin' }),
+        body: JSON.stringify({ role: 'superadmin' }),
       });
 
       if (response.ok) {
         // Update local state - demote current super admin and promote new one
         const updatedUsers = users.map(u => {
-          if (u.role === 'super_admin' && u.id !== showPromoteConfirm.id) {
+          if (u.role === 'superadmin' && u.id !== showPromoteConfirm.id) {
             return { ...u, role: 'admin' as const };
           }
           if (u.id === showPromoteConfirm.id) {
-            return { ...u, role: 'super_admin' as const };
+            return { ...u, role: 'superadmin' as const };
           }
           return u;
         });
@@ -1102,38 +1109,32 @@ function ManageUsersTab({
     }
   };
 
-  const handleEditUser = async () => {
-    if (!editingUser) return;
-
+  const handleToggleUserStatus = async (userId: number, isActive: boolean) => {
     setIsUpdating(true);
     try {
       const token = localStorage.getItem('bearer_token');
-      const response = await fetch(`/api/users/${editingUser.id}`, {
+      const response = await fetch(`/api/users/${userId}/status`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: editingUser.name,
-          email: editingUser.email
-        }),
+        body: JSON.stringify({ isActive: isActive }),
       });
 
       if (response.ok) {
         const updatedUsers = users.map(u => 
-          u.id === editingUser.id ? editingUser : u
+          u.id === userId ? { ...u, isActive: isActive } : u
         );
         setUsers(updatedUsers);
-        setEditingUser(null);
-        toast.success('User updated successfully');
+        toast.success(`User status updated to ${isActive ? 'Active' : 'Inactive'}`);
       } else {
         const error = await response.json();
-        toast.error(error.error || 'Failed to update user');
+        toast.error(error.error || 'Failed to update user status');
       }
     } catch (error) {
-      console.error('Update user error:', error);
-      toast.error('Failed to update user');
+      console.error('User status update error:', error);
+      toast.error('Failed to update user status');
     } finally {
       setIsUpdating(false);
     }
@@ -1141,10 +1142,10 @@ function ManageUsersTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-display font-bold">Manage Users</h2>
-          <p className="text-muted-foreground">Manage user roles and permissions (Super Admin only)</p>
+          <h3 className="text-xl font-semibold">Manage Users</h3>
+          <p className="text-muted-foreground">Manage user accounts and permissions</p>
         </div>
         <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
           <DialogTrigger asChild>
@@ -1157,34 +1158,61 @@ function ManageUsersTab({
             <DialogHeader>
               <DialogTitle>Add New User</DialogTitle>
               <DialogDescription>
-                Add a user by email and assign a role. The user must have already signed up to the system.
+                Create a new user account with appropriate role
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="user-email">Email Address *</Label>
-                <Input
-                  id="user-email"
-                  type="email"
-                  value={userForm.email}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="user@example.com"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="userName">Name *</Label>
+                  <Input
+                    id="userName"
+                    value={userForm.name}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Full name"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="userEmail">Email *</Label>
+                  <Input
+                    id="userEmail"
+                    type="email"
+                    value={userForm.email}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="user@example.com"
+                  />
+                </div>
               </div>
-              <div>
-                <Label htmlFor="user-role">Assign Role *</Label>
-                <Select 
-                  value={userForm.role} 
-                  onValueChange={(value: 'viewer' | 'admin') => setUserForm(prev => ({ ...prev, role: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="userPassword">Password *</Label>
+                  <Input
+                    id="userPassword"
+                    type="password"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="Password"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="userRole">Role *</Label>
+                  <Select 
+                    value={userForm.role} 
+                    onValueChange={(value: 'viewer' | 'admin' | 'superadmin') => 
+                      setUserForm(prev => ({ ...prev, role: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      {usersByRole.super_admin.length === 0 && (
+                        <SelectItem value="superadmin">Super Admin</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -1192,7 +1220,7 @@ function ManageUsersTab({
                 Cancel
               </Button>
               <Button onClick={handleAddUser} disabled={isUpdating}>
-                {isUpdating ? 'Adding...' : 'Add User'}
+                {isUpdating ? "Adding..." : "Add User"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1202,29 +1230,18 @@ function ManageUsersTab({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            User Roles & Permissions ({users.length} users)
+            <Shield className="h-5 w-5" />
+            System Users ({users.length})
           </CardTitle>
-          <CardDescription>
-            Control user access levels and permissions. Only Super Admin can manage user roles.
-          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="mb-4 p-4 bg-muted rounded-lg">
-            <h4 className="font-medium mb-2">Role Permissions:</h4>
-            <ul className="text-sm space-y-1 text-muted-foreground">
-              <li>• <strong>Viewer:</strong> Can view & export fines and reports only</li>
-              <li>• <strong>Admin:</strong> Can add fines, manage players & fine reasons. Cannot delete fines</li>
-              <li>• <strong>Super Admin:</strong> Full control - manage everything including user roles</li>
-            </ul>
-          </div>
-
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
-                <TableHead>Current Role</TableHead>
-                <TableHead>Joined</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last Active</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1232,117 +1249,70 @@ function ManageUsersTab({
               {users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                        <User className="h-4 w-4" />
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                        <span className="text-xs font-medium">
+                          {user.name.charAt(0)}
+                        </span>
                       </div>
                       <div>
-                        <p className="font-medium">{user.name}</p>
-                        <p className="text-sm text-muted-foreground">{user.email}</p>
+                        <span className="font-medium">{user.name}</span>
+                        <div className="text-xs text-muted-foreground">{user.email}</div>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge 
-                      variant={
-                        user.role === 'super_admin' ? 'destructive' :
-                        user.role === 'admin' ? 'default' : 'secondary'
-                      }
-                    >
-                      {user.role === 'super_admin' ? 'Super Admin' :
-                       user.role === 'admin' ? 'Admin' : 'Viewer'}
+                    <div className="flex items-center gap-2">
+                      {user.role === 'superadmin' && <Crown className="h-4 w-4 text-yellow-500" />}
+                      {user.role === 'admin' && <Shield className="h-4 w-4 text-blue-500" />}
+                      {user.role === 'viewer' && <Eye className="h-4 w-4 text-gray-500" />}
+                      <Badge 
+                        variant={
+                          user.role === 'superadmin' ? 'default' : 
+                          user.role === 'admin' ? 'secondary' : 
+                          'outline'
+                        }
+                      >
+                        {user.role === 'superadmin' ? 'Super Admin' : 
+                         user.role === 'admin' ? 'Admin' : 
+                         'Viewer'}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={user.isActive ? 'default' : 'secondary'}>
+                      {user.isActive ? 'Active' : 'Inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm text-muted-foreground">
-                      {new Date(user.createdAt).toLocaleDateString()}
+                      {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString() : 'Never'}
                     </span>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Dialog open={editingUser?.id === user.id} onOpenChange={(open) => {
-                        if (!open) setEditingUser(null);
-                        else setEditingUser({ ...user });
-                      }}>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Edit User</DialogTitle>
-                            <DialogDescription>
-                              Update user information
-                            </DialogDescription>
-                          </DialogHeader>
-                          {editingUser && (
-                            <div className="space-y-4">
-                              <div>
-                                <Label>Name</Label>
-                                <Input
-                                  value={editingUser.name}
-                                  onChange={(e) => setEditingUser(prev => 
-                                    prev ? { ...prev, name: e.target.value } : null
-                                  )}
-                                />
-                              </div>
-                              <div>
-                                <Label>Email</Label>
-                                <Input
-                                  value={editingUser.email}
-                                  onChange={(e) => setEditingUser(prev => 
-                                    prev ? { ...prev, email: e.target.value } : null
-                                  )}
-                                />
-                              </div>
-                            </div>
-                          )}
-                          <DialogFooter>
-                            <Button variant="outline" onClick={() => setEditingUser(null)}>
-                              Cancel
-                            </Button>
-                            <Button onClick={handleEditUser} disabled={isUpdating}>
-                              {isUpdating ? 'Saving...' : 'Save Changes'}
-                            </Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-
-                      {user.role === 'viewer' && (
+                      <Select
+                        value={user.role}
+                        onValueChange={(newRole) => handleUpdateUserRole(user.id, newRole)}
+                        disabled={isUpdating}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="viewer">Viewer</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="superadmin">Super Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {user.role !== 'superadmin' && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleRoleChange(user.id, 'admin')}
-                          disabled={isUpdating}
+                          onClick={() => handleToggleUserStatus(user.id, !user.isActive)}
                         >
-                          Promote to Admin
+                          {user.isActive ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
                         </Button>
-                      )}
-                      {user.role === 'admin' && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRoleChange(user.id, 'viewer')}
-                            disabled={isUpdating}
-                          >
-                            Demote to Viewer
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRoleChange(user.id, 'super_admin')}
-                            disabled={isUpdating}
-                          >
-                            Make Super Admin
-                          </Button>
-                        </>
-                      )}
-                      {user.role === 'super_admin' && (
-                        <Badge variant="outline" className="text-xs">
-                          Current Super Admin
-                        </Badge>
                       )}
                     </div>
                   </TableCell>
@@ -1350,16 +1320,56 @@ function ManageUsersTab({
               ))}
             </TableBody>
           </Table>
-
           {users.length === 0 && (
             <div className="text-center py-8">
-              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <p className="text-muted-foreground">No users found</p>
             </div>
           )}
         </CardContent>
       </Card>
 
+      {/* Role Permissions Reference */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Role Permissions Reference</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <h4 className="font-medium text-destructive">Super Admin</h4>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• Full system access</li>
+                <li>• Manage all users & roles</li>
+                <li>• Access audit logs</li>
+                <li>• System configuration</li>
+                <li>• Manage players & fines</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-medium text-primary">Admin</h4>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• Manage players</li>
+                <li>• Add & edit fines</li>
+                <li>• Manage fine reasons</li>
+                <li>• View reports</li>
+                <li>• Export data</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-medium text-muted-foreground">Viewer</h4>
+              <ul className="text-sm space-y-1 text-muted-foreground">
+                <li>• View fines only</li>
+                <li>• View reports</li>
+                <li>• Export data</li>
+                <li>• No editing permissions</li>
+              </ul>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Super Admin Promotion Confirmation */}
       <AlertDialog open={!!showPromoteConfirm} onOpenChange={(open) => {
         if (!open) setShowPromoteConfirm(null);
       }}>
@@ -1383,6 +1393,123 @@ function ManageUsersTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function CustomizationTab({ 
+  systemConfig, 
+  setSystemConfig 
+}: {
+  systemConfig: SystemConfig;
+  setSystemConfig: (config: SystemConfig) => void;
+}) {
+  const [tempConfig, setTempConfig] = useState(systemConfig);
+
+  const handleSave = () => {
+    setSystemConfig(tempConfig);
+    toast.success("Settings saved successfully");
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-display font-bold">Customization</h2>
+        <p className="text-muted-foreground">Configure app settings and branding</p>
+      </div>
+
+      <div className="grid gap-6 max-w-2xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>Currency Settings</CardTitle>
+            <CardDescription>
+              Choose the currency symbol for displaying fines
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="currency">Currency Symbol</Label>
+              <Select 
+                value={tempConfig.currency} 
+                onValueChange={(value) => setTempConfig(prev => ({ ...prev, currency: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="$">$ (US Dollar)</SelectItem>
+                  <SelectItem value="₹">₹ (Indian Rupee)</SelectItem>
+                  <SelectItem value="€">€ (Euro)</SelectItem>
+                  <SelectItem value="£">£ (British Pound)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Fine Frequency</CardTitle>
+            <CardDescription>
+              Set how often fines are collected and reset
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="frequency">Collection Frequency</Label>
+              <Select 
+                value={tempConfig.fineFrequency} 
+                onValueChange={(value: 'match' | 'week' | 'season') => 
+                  setTempConfig(prev => ({ ...prev, fineFrequency: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="match">Per Match</SelectItem>
+                  <SelectItem value="week">Weekly</SelectItem>
+                  <SelectItem value="season">Per Season</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Branding</CardTitle>
+            <CardDescription>
+              Customize the app name and branding
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="app-name">App Name</Label>
+              <Input
+                id="app-name"
+                value={tempConfig.appName}
+                onChange={(e) => setTempConfig(prev => ({ ...prev, appName: e.target.value }))}
+                placeholder="CCL Fines"
+              />
+            </div>
+            <div>
+              <Label htmlFor="logo-url">Logo URL (optional)</Label>
+              <Input
+                id="logo-url"
+                value={tempConfig.logoUrl || ''}
+                onChange={(e) => setTempConfig(prev => ({ ...prev, logoUrl: e.target.value }))}
+                placeholder="https://example.com/logo.png"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end">
+          <Button onClick={handleSave}>
+            Save Settings
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1421,7 +1548,7 @@ function AuditTab({ auditLog }: { auditLog: AuditEntry[] }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Logs className="h-5 w-5" />
+            <ScrollText className="h-5 w-5" />
             System Activity Log
           </CardTitle>
           <div className="flex gap-4 mt-4">

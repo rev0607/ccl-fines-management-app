@@ -25,7 +25,7 @@ import {
   Eye, 
   EyeOff, 
   Calendar as CalendarIcon,
-  DollarSign,
+  Coins,
   TrendingUp,
   Users,
   Clock,
@@ -73,7 +73,7 @@ interface FinesPanelProps {
   userRole?: "viewer" | "admin" | "superadmin";
 }
 
-export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
+export default function FinesPanel({ userRole }: FinesPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState("fines");
   const [fines, setFines] = useState<Fine[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -106,6 +106,27 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
 
   useEffect(() => {
     fetchData();
+  }, []);
+
+  // Refresh data function
+  const refreshData = async () => {
+    await Promise.all([
+      fetchPlayers(),
+      fetchFineReasons(),
+      fetchFines()
+    ]);
+  };
+
+  // Listen for storage events to refresh data when other tabs make changes
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'fines_data_updated' || e.key === 'players_data_updated' || e.key === 'fine_reasons_data_updated') {
+        refreshData();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const fetchData = async () => {
@@ -201,6 +222,10 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
     return () => clearTimeout(debounce);
   }, [searchTerm, selectedPlayer, selectedReason, dateRange, showDeleted]);
 
+  const formatCurrency = (amount: number) => {
+    return `₹${amount.toFixed(2)}`;
+  };
+
   const handleAddFine = async () => {
     if (!formData.playerId || !formData.fineReasonId || !formData.amount) {
       toast.error("Please fill in all required fields");
@@ -235,6 +260,8 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
           customReason: ""
         });
         fetchFines();
+        // Notify other tabs that data has changed
+        localStorage.setItem('fines_data_updated', Date.now().toString());
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to add fine");
@@ -420,7 +447,7 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
                           <SelectContent>
                             {fineReasons.map((reason) => (
                               <SelectItem key={reason.id} value={reason.id.toString()}>
-                                {reason.name} (${reason.defaultAmount})
+                                {reason.name} (₹{reason.defaultAmount})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -429,7 +456,7 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="amount">Amount ($) *</Label>
+                        <Label htmlFor="amount">Amount (₹) *</Label>
                         <Input
                           id="amount"
                           type="number"
@@ -478,7 +505,7 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
                       onClick={() => handleQuickFine(reason.id, reason.defaultAmount)}
                     >
                       <span className="font-medium">{reason.name}</span>
-                      <Badge variant="secondary">${reason.defaultAmount}</Badge>
+                      <Badge variant="secondary">₹{reason.defaultAmount}</Badge>
                     </Button>
                   ))}
                 </div>
@@ -619,7 +646,7 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
                       </TableCell>
                       <TableCell>
                         <Badge variant="destructive" className="font-mono">
-                          ${fine.amount.toFixed(2)}
+                          ₹{fine.amount.toFixed(2)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -669,7 +696,7 @@ export default function FinesPanel({ userRole = "viewer" }: FinesPanelProps) {
               
               {fines.length === 0 && (
                 <div className="text-center py-8">
-                  <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <Coins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <p className="text-muted-foreground">No fines found matching your criteria</p>
                 </div>
               )}
