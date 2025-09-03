@@ -2,16 +2,50 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { players, users } from '@/db/schema';
 import { eq, like, and, isNull, desc } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
-    // Validate session
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
+    const currentUser = await db.select()
+      .from(users)
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
+      .limit(1);
+
+    if (currentUser.length === 0) {
+      return NextResponse.json({ 
+        error: 'User not found or inactive',
+        code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
 
@@ -52,24 +86,46 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate session and check permissions
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
       }, { status: 401 });
     }
 
-    // Get user from database to check role
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
     const currentUser = await db.select()
       .from(users)
-      .where(eq(users.email, session.user.email))
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
       .limit(1);
 
     if (currentUser.length === 0) {
       return NextResponse.json({ 
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }

@@ -1,83 +1,108 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { fines, players, fineReasons, users } from '@/db/schema';
-import { eq, like, and, or, desc, asc, gte, lte, isNull } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
+import { eq, like, and, isNull, desc, asc, or } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
   try {
-    // Validate session
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
       }, { status: 401 });
     }
 
-    const searchParams = request.nextUrl.searchParams;
-    const limit = Math.min(parseInt(searchParams.get('limit') || '10'), 100);
-    const offset = parseInt(searchParams.get('offset') || '0');
-    const search = searchParams.get('search');
-    const playerId = searchParams.get('player_id');
-    const fineReasonId = searchParams.get('fine_reason_id');
-    const startDate = searchParams.get('start_date');
-    const endDate = searchParams.get('end_date');
-    const sort = searchParams.get('sort') || 'fineDate';
-    const order = searchParams.get('order') || 'desc';
-    const includeDeleted = searchParams.get('include_deleted') === 'true';
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
 
-    // Build base query with JOINs
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
+    const currentUser = await db.select()
+      .from(users)
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
+      .limit(1);
+
+    if (currentUser.length === 0) {
+      return NextResponse.json({ 
+        error: 'User not found or inactive',
+        code: 'USER_NOT_FOUND' 
+      }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20'), 100);
+    const offset = parseInt(searchParams.get('offset') || '0');
+    const playerId = searchParams.get('player_id');
+    const reasonId = searchParams.get('reason_id');
+    const search = searchParams.get('search');
+    const includeDeleted = searchParams.get('include_deleted') === 'true';
+    const sortBy = searchParams.get('sort_by') || 'created_at';
+    const sortOrder = searchParams.get('sort_order') || 'desc';
+
+    // Build the query with joins
     let query = db.select({
       id: fines.id,
-      playerId: fines.playerId,
-      playerName: players.name,
-      fineReasonId: fines.fineReasonId,
-      fineReasonName: fineReasons.reason,
       amount: fines.amount,
-      fineDate: fines.fineDate,
-      addedById: fines.addedByUserId,
-      addedByName: users.name,
+      notes: fines.notes,
       createdAt: fines.createdAt,
       updatedAt: fines.updatedAt,
-      deletedAt: fines.deletedAt
+      deletedAt: fines.deletedAt,
+      player: {
+        id: players.id,
+        name: players.name,
+      },
+      reason: {
+        id: fineReasons.id,
+        reason: fineReasons.reason,
+      }
     })
     .from(fines)
-    .leftJoin(players, and(eq(fines.playerId, players.id), isNull(players.deletedAt)))
-    .leftJoin(fineReasons, and(eq(fines.fineReasonId, fineReasons.id), isNull(fineReasons.deletedAt)))
-    .leftJoin(users, eq(fines.addedByUserId, users.id));
+    .leftJoin(players, eq(fines.playerId, players.id))
+    .leftJoin(fineReasons, eq(fines.reasonId, fineReasons.id));
 
-    // Apply filters
     const conditions = [];
 
-    // Only include deleted fines if specifically requested and user has permission
+    // Only include deleted fines if specifically requested
     if (!includeDeleted) {
       conditions.push(isNull(fines.deletedAt));
+    }
+
+    if (playerId) {
+      conditions.push(eq(fines.playerId, parseInt(playerId)));
+    }
+
+    if (reasonId) {
+      conditions.push(eq(fines.reasonId, parseInt(reasonId)));
     }
 
     if (search) {
       conditions.push(
         or(
           like(players.name, `%${search}%`),
-          like(fineReasons.reason, `%${search}%`)
+          like(fineReasons.reason, `%${search}%`),
+          like(fines.notes, `%${search}%`)
         )
       );
-    }
-
-    if (playerId && !isNaN(parseInt(playerId))) {
-      conditions.push(eq(fines.playerId, parseInt(playerId)));
-    }
-
-    if (fineReasonId && !isNaN(parseInt(fineReasonId))) {
-      conditions.push(eq(fines.fineReasonId, parseInt(fineReasonId)));
-    }
-
-    if (startDate) {
-      conditions.push(gte(fines.fineDate, startDate));
-    }
-
-    if (endDate) {
-      conditions.push(lte(fines.fineDate, endDate));
     }
 
     if (conditions.length > 0) {
@@ -85,19 +110,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Apply sorting
-    const orderFn = order === 'asc' ? asc : desc;
-    switch (sort) {
-      case 'playerName':
-        query = query.orderBy(orderFn(players.name));
-        break;
-      case 'amount':
-        query = query.orderBy(orderFn(fines.amount));
-        break;
-      case 'createdAt':
-        query = query.orderBy(orderFn(fines.createdAt));
-        break;
-      default:
-        query = query.orderBy(orderFn(fines.fineDate));
+    if (sortBy === 'amount') {
+      query = sortOrder === 'asc' ? query.orderBy(asc(fines.amount)) : query.orderBy(desc(fines.amount));
+    } else if (sortBy === 'player') {
+      query = sortOrder === 'asc' ? query.orderBy(asc(players.name)) : query.orderBy(desc(players.name));
+    } else if (sortBy === 'reason') {
+      query = sortOrder === 'asc' ? query.orderBy(asc(fineReasons.reason)) : query.orderBy(desc(fineReasons.reason));
+    } else {
+      // Default to created_at
+      query = sortOrder === 'asc' ? query.orderBy(asc(fines.createdAt)) : query.orderBy(desc(fines.createdAt));
     }
 
     const results = await query.limit(limit).offset(offset);
@@ -113,24 +134,46 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate session and check permissions
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
       }, { status: 401 });
     }
 
-    // Get user from database to check role
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
     const currentUser = await db.select()
       .from(users)
-      .where(eq(users.email, session.user.email))
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
       .limit(1);
 
     if (currentUser.length === 0) {
       return NextResponse.json({ 
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
@@ -146,98 +189,103 @@ export async function POST(request: NextRequest) {
     }
 
     const requestBody = await request.json();
-    const { playerId, fineReasonId, amount, fineDate } = requestBody;
+    const { playerId, reasonId, amount, notes } = requestBody;
 
     // Validate required fields
-    if (!playerId || isNaN(parseInt(playerId))) {
+    if (!playerId || !reasonId || amount === undefined) {
       return NextResponse.json({ 
-        error: "Valid player ID is required",
-        code: "INVALID_PLAYER_ID" 
+        error: "Missing required fields: playerId, reasonId, amount",
+        code: "MISSING_REQUIRED_FIELDS" 
       }, { status: 400 });
     }
 
-    if (!fineReasonId || isNaN(parseInt(fineReasonId))) {
+    // Validate amount
+    if (typeof amount !== 'number' || amount < 0) {
       return NextResponse.json({ 
-        error: "Valid fine reason ID is required",
-        code: "INVALID_FINE_REASON_ID" 
-      }, { status: 400 });
-    }
-
-    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-      return NextResponse.json({ 
-        error: "Valid positive amount is required",
+        error: "Amount must be a non-negative number",
         code: "INVALID_AMOUNT" 
       }, { status: 400 });
     }
 
-    if (!fineDate) {
-      return NextResponse.json({ 
-        error: "Fine date is required",
-        code: "MISSING_FINE_DATE" 
-      }, { status: 400 });
-    }
-
-    // Validate that player exists and is not soft deleted
+    // Validate player exists and is not deleted
     const player = await db.select()
       .from(players)
-      .where(and(eq(players.id, parseInt(playerId)), isNull(players.deletedAt)))
+      .where(and(
+        eq(players.id, playerId),
+        isNull(players.deletedAt)
+      ))
       .limit(1);
 
     if (player.length === 0) {
       return NextResponse.json({ 
-        error: "Player not found",
+        error: "Player not found or inactive",
         code: "PLAYER_NOT_FOUND" 
-      }, { status: 404 });
+      }, { status: 400 });
     }
 
-    // Validate that fine reason exists and is not soft deleted
+    // Validate fine reason exists and is not deleted
     const fineReason = await db.select()
       .from(fineReasons)
-      .where(and(eq(fineReasons.id, parseInt(fineReasonId)), isNull(fineReasons.deletedAt)))
+      .where(and(
+        eq(fineReasons.id, reasonId),
+        isNull(fineReasons.deletedAt)
+      ))
       .limit(1);
 
     if (fineReason.length === 0) {
       return NextResponse.json({ 
-        error: "Fine reason not found",
-        code: "FINE_REASON_NOT_FOUND" 
-      }, { status: 404 });
+        error: "Fine reason not found or inactive",
+        code: "REASON_NOT_FOUND" 
+      }, { status: 400 });
     }
 
-    // Create new fine
+    // Validate notes length if provided
+    if (notes && (typeof notes !== 'string' || notes.length > 500)) {
+      return NextResponse.json({ 
+        error: "Notes must be a string with maximum 500 characters",
+        code: "INVALID_NOTES" 
+      }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    const insertData = {
+      playerId,
+      reasonId,
+      amount,
+      notes: notes?.trim() || null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null
+    };
+
     const newFine = await db.insert(fines)
-      .values({
-        playerId: parseInt(playerId),
-        fineReasonId: parseInt(fineReasonId),
-        amount: parseFloat(amount),
-        fineDate: fineDate.trim(),
-        addedByUserId: user.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      })
+      .values(insertData)
       .returning();
 
-    // Return created fine with JOINed data
-    const createdFineWithDetails = await db.select({
+    // Return the fine with joined player and reason data
+    const createdFine = await db.select({
       id: fines.id,
-      playerId: fines.playerId,
-      playerName: players.name,
-      fineReasonId: fines.fineReasonId,
-      fineReasonName: fineReasons.reason,
       amount: fines.amount,
-      fineDate: fines.fineDate,
-      addedById: fines.addedByUserId,
-      addedByName: users.name,
+      notes: fines.notes,
       createdAt: fines.createdAt,
-      updatedAt: fines.updatedAt
+      updatedAt: fines.updatedAt,
+      deletedAt: fines.deletedAt,
+      player: {
+        id: players.id,
+        name: players.name,
+      },
+      reason: {
+        id: fineReasons.id,
+        reason: fineReasons.reason,
+      }
     })
     .from(fines)
     .leftJoin(players, eq(fines.playerId, players.id))
-    .leftJoin(fineReasons, eq(fines.fineReasonId, fineReasons.id))
-    .leftJoin(users, eq(fines.addedByUserId, users.id))
+    .leftJoin(fineReasons, eq(fines.reasonId, fineReasons.id))
     .where(eq(fines.id, newFine[0].id))
     .limit(1);
 
-    return NextResponse.json(createdFineWithDetails[0], { status: 201 });
+    return NextResponse.json(createdFine[0], { status: 201 });
   } catch (error) {
     console.error('POST fines error:', error);
     return NextResponse.json({ 

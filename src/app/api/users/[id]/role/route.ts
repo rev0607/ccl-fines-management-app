@@ -2,119 +2,125 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Validate session and check permissions
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
       }, { status: 401 });
     }
 
-    // Get current user from database to check role
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
     const currentUser = await db.select()
       .from(users)
-      .where(eq(users.email, session.user.email))
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
       .limit(1);
 
     if (currentUser.length === 0) {
       return NextResponse.json({ 
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
 
-    const user = currentUser[0];
-    
-    // Only superadmin can change user roles
-    if (user.role !== 'superadmin') {
+    // Check if current user is superadmin
+    if (currentUser[0].role !== 'superadmin') {
       return NextResponse.json({ 
         error: 'Insufficient permissions. Only superadmin can change user roles.',
         code: 'INSUFFICIENT_PERMISSIONS' 
       }, { status: 403 });
     }
 
-    const { id } = params;
-    
-    // Validate ID
-    if (!id || isNaN(parseInt(id))) {
+    const userId = parseInt(params.id);
+    if (isNaN(userId)) {
       return NextResponse.json({ 
-        error: "Valid user ID is required",
-        code: "INVALID_ID" 
+        error: 'Invalid user ID',
+        code: 'INVALID_USER_ID' 
       }, { status: 400 });
     }
-    
-    const userId = parseInt(id);
-    
-    // Parse request body
-    const { role } = await request.json();
-    
-    // Validate role is provided
-    if (!role) {
+
+    const body = await request.json();
+    const { role } = body;
+
+    // Validate role
+    if (!role || !['viewer', 'admin', 'superadmin'].includes(role)) {
       return NextResponse.json({ 
-        error: "Role is required",
-        code: "MISSING_ROLE" 
+        error: 'Invalid role. Must be viewer, admin, or superadmin',
+        code: 'INVALID_ROLE' 
       }, { status: 400 });
     }
-    
-    // Validate role value
-    const validRoles = ['viewer', 'admin', 'superadmin'];
-    if (!validRoles.includes(role)) {
-      return NextResponse.json({ 
-        error: "Role must be one of: viewer, admin, superadmin",
-        code: "INVALID_ROLE" 
-      }, { status: 400 });
-    }
-    
-    // Check if user exists and is not soft deleted
-    const existingUser = await db.select()
+
+    // Check if target user exists and is not deleted
+    const targetUser = await db.select()
       .from(users)
-      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .where(and(
+        eq(users.id, userId),
+        isNull(users.deletedAt)
+      ))
       .limit(1);
-    
-    if (existingUser.length === 0) {
+
+    if (targetUser.length === 0) {
       return NextResponse.json({ 
-        error: 'User not found or has been deleted' 
+        error: 'Target user not found or inactive',
+        code: 'TARGET_USER_NOT_FOUND' 
       }, { status: 404 });
     }
-    
-    // Prevent changing own role to prevent lockout
-    if (userId === user.id && role !== 'superadmin') {
+
+    // Prevent superadmin from demoting themselves
+    if (currentUserId === userId && role !== 'superadmin') {
       return NextResponse.json({ 
-        error: 'Cannot change your own superadmin role to prevent system lockout',
-        code: 'CANNOT_CHANGE_OWN_ROLE' 
+        error: 'Cannot change your own superadmin role',
+        code: 'CANNOT_DEMOTE_SELF' 
       }, { status: 400 });
     }
-    
+
     // Update user role
-    const updated = await db.update(users)
+    const updatedUser = await db.update(users)
       .set({
         role,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date(),
       })
-      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .where(eq(users.id, userId))
       .returning();
+
+    const { passwordHash, ...userData } = updatedUser[0];
     
-    if (updated.length === 0) {
-      return NextResponse.json({ 
-        error: 'User not found or has been deleted' 
-      }, { status: 404 });
-    }
-    
-    // Return updated user excluding password_hash
-    const { passwordHash, ...userWithoutPassword } = updated[0];
-    
-    return NextResponse.json(userWithoutPassword);
+    return NextResponse.json({
+      message: 'User role updated successfully',
+      user: userData
+    }, { status: 200 });
     
   } catch (error) {
-    console.error('PUT /api/users/[id]/role error:', error);
+    console.error('PUT user role error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error 
     }, { status: 500 });

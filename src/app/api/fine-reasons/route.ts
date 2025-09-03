@@ -2,16 +2,50 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { fineReasons, users } from '@/db/schema';
 import { eq, like, and, isNull, desc } from 'drizzle-orm';
-import { auth } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
-    // Validate session
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
+    const currentUser = await db.select()
+      .from(users)
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
+      .limit(1);
+
+    if (currentUser.length === 0) {
+      return NextResponse.json({ 
+        error: 'User not found or inactive',
+        code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
 
@@ -21,14 +55,8 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search');
     const includeDeleted = searchParams.get('include_deleted') === 'true';
 
-    let query = db.select({
-      id: fineReasons.id,
-      name: fineReasons.reason,
-      defaultAmount: fineReasons.defaultAmount,
-      createdAt: fineReasons.createdAt,
-      updatedAt: fineReasons.updatedAt,
-      deletedAt: fineReasons.deletedAt
-    }).from(fineReasons);
+    let query = db.select().from(fineReasons)
+      .orderBy(desc(fineReasons.createdAt));
 
     const conditions = [];
 
@@ -45,14 +73,11 @@ export async function GET(request: NextRequest) {
       query = query.where(and(...conditions));
     }
 
-    const results = await query
-      .orderBy(desc(fineReasons.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const results = await query.limit(limit).offset(offset);
 
     return NextResponse.json(results);
   } catch (error) {
-    console.error('GET fine-reasons error:', error);
+    console.error('GET fine reasons error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error 
     }, { status: 500 });
@@ -61,24 +86,46 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate session and check permissions
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    // Extract bearer token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ 
-        error: 'Unauthorized',
-        code: 'UNAUTHORIZED' 
+        error: 'Authorization header missing or invalid',
+        code: 'MISSING_TOKEN' 
       }, { status: 401 });
     }
 
-    // Get user from database to check role
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    
+    // Parse user ID from token (format: user_${userId}_${timestamp})
+    const tokenParts = token.split('_');
+    if (tokenParts.length !== 3 || tokenParts[0] !== 'user') {
+      return NextResponse.json({ 
+        error: 'Invalid token format',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    const currentUserId = parseInt(tokenParts[1]);
+    if (isNaN(currentUserId)) {
+      return NextResponse.json({ 
+        error: 'Invalid user ID in token',
+        code: 'INVALID_TOKEN' 
+      }, { status: 401 });
+    }
+
+    // Find current user by ID where deleted_at is null (not soft deleted)
     const currentUser = await db.select()
       .from(users)
-      .where(eq(users.email, session.user.email))
+      .where(and(
+        eq(users.id, currentUserId),
+        isNull(users.deletedAt)
+      ))
       .limit(1);
 
     if (currentUser.length === 0) {
       return NextResponse.json({ 
-        error: 'User not found',
+        error: 'User not found or inactive',
         code: 'USER_NOT_FOUND' 
       }, { status: 401 });
     }
@@ -94,15 +141,7 @@ export async function POST(request: NextRequest) {
     }
 
     const requestBody = await request.json();
-    const { reason, default_amount } = requestBody;
-
-    // Security check: reject if user ID fields provided
-    if ('userId' in requestBody || 'user_id' in requestBody || 'addedByUserId' in requestBody) {
-      return NextResponse.json({ 
-        error: "User ID cannot be provided in request body",
-        code: "USER_ID_NOT_ALLOWED" 
-      }, { status: 400 });
-    }
+    const { reason, defaultAmount } = requestBody;
 
     // Validate required fields
     if (!reason) {
@@ -112,44 +151,35 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (default_amount === undefined || default_amount === null) {
-      return NextResponse.json({ 
-        error: "Default amount is required",
-        code: "MISSING_REQUIRED_FIELD" 
-      }, { status: 400 });
-    }
-
     // Validate reason length
-    const trimmedReason = reason.trim();
-    if (trimmedReason.length < 3) {
+    if (typeof reason !== 'string' || reason.trim().length < 2) {
       return NextResponse.json({ 
-        error: "Reason must be at least 3 characters long",
+        error: "Reason must be at least 2 characters long",
         code: "INVALID_REASON_LENGTH" 
       }, { status: 400 });
     }
 
-    if (trimmedReason.length > 200) {
+    if (reason.trim().length > 200) {
       return NextResponse.json({ 
-        error: "Reason must not exceed 200 characters",
+        error: "Reason must be no more than 200 characters long",
         code: "INVALID_REASON_LENGTH" 
       }, { status: 400 });
     }
 
-    // Validate default_amount
-    const amount = parseFloat(default_amount);
-    if (isNaN(amount) || amount < 0) {
+    // Validate default amount
+    if (defaultAmount !== undefined && (typeof defaultAmount !== 'number' || defaultAmount < 0)) {
       return NextResponse.json({ 
-        error: "Default amount must be a valid number greater than or equal to 0",
+        error: "Default amount must be a non-negative number",
         code: "INVALID_DEFAULT_AMOUNT" 
       }, { status: 400 });
     }
 
-    const currentTime = new Date().toISOString();
+    const now = new Date().toISOString();
     const insertData = {
-      reason: trimmedReason,
-      defaultAmount: amount,
-      createdAt: currentTime,
-      updatedAt: currentTime,
+      reason: reason.trim(),
+      defaultAmount: defaultAmount || 0,
+      createdAt: now,
+      updatedAt: now,
       deletedAt: null
     };
 
@@ -159,7 +189,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(newFineReason[0], { status: 201 });
   } catch (error) {
-    console.error('POST fine-reasons error:', error);
+    console.error('POST fine reasons error:', error);
     return NextResponse.json({ 
       error: 'Internal server error: ' + error 
     }, { status: 500 });
